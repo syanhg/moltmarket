@@ -16,15 +16,15 @@ export default function Error({
   return (
     <div className="flex flex-col items-center justify-center min-h-[60vh] px-4">
       <p className="text-6xl font-bold text-gray-200 mb-4">Error</p>
-      <h1 className="text-xl font-bold text-gray-900 mb-2">
+      <h1 className="text-lg font-bold text-gray-900 mb-2">
         Something went wrong
       </h1>
-      <p className="text-sm text-gray-500 mb-6 text-center max-w-md">
+      <p className="text-xs text-gray-500 mb-6 text-center max-w-md">
         An unexpected error occurred. Please try again.
       </p>
       <button
         onClick={reset}
-        className="bg-gray-900 px-5 py-2.5 text-sm font-semibold text-white hover:bg-gray-800 transition-colors"
+        className="bg-[#1565c0] px-5 py-2.5 text-xs font-semibold text-white hover:bg-[#0d47a1] transition-colors"
       >
         Try Again
       </button>

@@ -17,16 +17,16 @@ function timeAgo(ts: number): string {
 function formatSide(side: string): { label: string; color: string } {
   const s = side.toLowerCase();
   if (s === "yes" || s.includes("buy yes")) {
-    return { label: "Buy YES", color: "text-emerald-600" };
+    return { label: "BUY YES", color: "num-positive" };
   }
   if (s === "no" || s.includes("buy no")) {
-    return { label: "Buy NO", color: "text-red-600" };
+    return { label: "BUY NO", color: "num-negative" };
   }
   if (s.includes("sell yes")) {
-    return { label: "Sell YES", color: "text-red-600" };
+    return { label: "SELL YES", color: "num-negative" };
   }
   if (s.includes("sell no")) {
-    return { label: "Sell NO", color: "text-emerald-600" };
+    return { label: "SELL NO", color: "num-positive" };
   }
   return { label: side, color: "text-gray-600" };
 }
@@ -36,18 +36,18 @@ export default function LiveActivity({ trades }: Props) {
     <div className="overflow-x-auto">
       <table className="w-full text-[13px]">
         <thead>
-          <tr className="text-left text-xs font-semibold text-gray-400 uppercase tracking-wider border-b border-gray-200">
-            <th className="pb-3 pr-3">Model</th>
-            <th className="pb-3 pr-3">Side</th>
-            <th className="pb-3 pr-3">Ticker</th>
-            <th className="pb-3 pr-3 text-right">Qty @ Price</th>
-            <th className="pb-3 text-right">Time</th>
+          <tr className="text-left text-[10px] font-semibold text-gray-400 uppercase tracking-wider border-b border-gray-200 bg-gray-50/60">
+            <th className="px-3 py-2.5">Agent</th>
+            <th className="px-3 py-2.5">Side</th>
+            <th className="px-3 py-2.5">Market</th>
+            <th className="px-3 py-2.5 text-right">Qty @ Price</th>
+            <th className="px-3 py-2.5 text-right">Time</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-gray-100">
+        <tbody className="divide-y divide-gray-50">
           {trades.length === 0 && (
             <tr>
-              <td colSpan={5} className="py-12 text-center text-gray-400 text-sm">
+              <td colSpan={5} className="py-10 text-center text-gray-400 text-xs">
                 No trades yet. Agents submit predictions via MCP.
               </td>
             </tr>
@@ -55,32 +55,32 @@ export default function LiveActivity({ trades }: Props) {
           {trades.map((t) => {
             const side = formatSide(t.side);
             const conditionId = t.market_id
-              ? t.market_id.slice(0, 12).toUpperCase()
+              ? t.market_id.slice(0, 10).toUpperCase()
               : "";
             return (
-              <tr key={t.id} className="hover:bg-gray-50/50 transition-colors">
-                <td className="py-2.5 pr-3">
-                  <span className="font-medium text-gray-800">{t.agent_name}</span>
+              <tr key={t.id} className="fin-row transition-colors">
+                <td className="px-3 py-2">
+                  <span className="font-medium text-gray-800 text-xs">{t.agent_name}</span>
                 </td>
-                <td className="py-2.5 pr-3">
-                  <span className={`font-semibold ${side.color}`}>
+                <td className="px-3 py-2">
+                  <span className={`text-xs font-bold ${side.color}`}>
                     {side.label}
                   </span>
                 </td>
-                <td className="py-2.5 pr-3">
-                  <div className="max-w-[280px]">
-                    <div className="text-gray-700 truncate">{t.ticker}</div>
+                <td className="px-3 py-2">
+                  <div className="max-w-[260px]">
+                    <div className="text-xs text-gray-700 truncate">{t.ticker}</div>
                     {conditionId && (
-                      <div className="text-[10px] text-gray-400 font-mono mt-0.5">
+                      <div className="text-[9px] text-gray-400 font-mono mt-0.5">
                         {conditionId}
                       </div>
                     )}
                   </div>
                 </td>
-                <td className="py-2.5 pr-3 text-right font-mono text-gray-700 whitespace-nowrap">
+                <td className="px-3 py-2 text-right font-mono text-xs text-gray-700 whitespace-nowrap">
                   {t.qty} @ {typeof t.price === "number" ? t.price.toFixed(2) : t.price}
                 </td>
-                <td className="py-2.5 text-right text-gray-400 whitespace-nowrap">
+                <td className="px-3 py-2 text-right text-[11px] text-gray-400 whitespace-nowrap">
                   {timeAgo(t.timestamp)}
                 </td>
               </tr>

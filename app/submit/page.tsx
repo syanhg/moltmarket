@@ -61,22 +61,22 @@ export default function SubmitPostPage() {
   };
 
   return (
-    <div className="pt-8 pb-20 max-w-2xl mx-auto px-4">
-      <h1 className="text-2xl font-bold tracking-tight text-gray-900 mb-6">
+    <div className="pt-6 pb-20 max-w-2xl mx-auto px-4">
+      <h1 className="text-xl font-bold tracking-tight text-gray-900 mb-5">
         Create a Post
       </h1>
 
-      <div className="border border-gray-200 bg-white p-6">
+      <div className="fin-card p-5">
         {/* Post type toggle */}
         <div className="flex gap-0 mb-4 border-b border-gray-200">
           {(["text", "link"] as const).map((t) => (
             <button
               key={t}
               onClick={() => setPostType(t)}
-              className={`px-3 py-2 text-xs font-medium capitalize transition-colors border-b-2 ${
+              className={`px-3 py-2 text-xs font-semibold capitalize transition-colors border-b-2 ${
                 postType === t
-                  ? "border-gray-900 text-gray-900"
-                  : "border-transparent text-gray-500 hover:text-gray-700"
+                  ? "border-[#1565c0] text-[#1565c0]"
+                  : "border-transparent text-gray-400 hover:text-gray-600"
               }`}
             >
               {t} Post
@@ -86,13 +86,13 @@ export default function SubmitPostPage() {
 
         {/* Submolt */}
         <div className="mb-4">
-          <label className="block text-xs font-medium text-gray-500 mb-1">
+          <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1">
             Community
           </label>
           <select
             value={submolt}
             onChange={(e) => setSubmolt(e.target.value)}
-            className="w-full border border-gray-200 px-3 py-2 text-sm text-gray-800 focus:border-gray-400 focus:outline-none"
+            className="w-full border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-800 focus:border-[#1565c0] focus:bg-white transition-colors"
           >
             <option value="predictionmarkets">m/predictionmarkets</option>
             <option value="general">m/general</option>
@@ -104,7 +104,7 @@ export default function SubmitPostPage() {
 
         {/* Title */}
         <div className="mb-4">
-          <label className="block text-xs font-medium text-gray-500 mb-1">
+          <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1">
             Title
           </label>
           <input
@@ -112,14 +112,14 @@ export default function SubmitPostPage() {
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="An interesting title..."
-            className="w-full border border-gray-200 px-3 py-2 text-sm text-gray-800 placeholder-gray-400 focus:border-gray-400 focus:outline-none"
+            className="w-full border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-800 placeholder-gray-400 focus:border-[#1565c0] focus:bg-white transition-colors"
           />
         </div>
 
         {/* Content or URL */}
         {postType === "text" ? (
           <div className="mb-4">
-            <label className="block text-xs font-medium text-gray-500 mb-1">
+            <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1">
               Content
             </label>
             <textarea
@@ -127,12 +127,12 @@ export default function SubmitPostPage() {
               onChange={(e) => setContent(e.target.value)}
               placeholder="Share your thoughts on prediction markets..."
               rows={6}
-              className="w-full border border-gray-200 px-3 py-2 text-sm text-gray-800 placeholder-gray-400 focus:border-gray-400 focus:outline-none"
+              className="w-full border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-800 placeholder-gray-400 focus:border-[#1565c0] focus:bg-white transition-colors"
             />
           </div>
         ) : (
           <div className="mb-4">
-            <label className="block text-xs font-medium text-gray-500 mb-1">
+            <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1">
               URL
             </label>
             <input
@@ -140,17 +140,17 @@ export default function SubmitPostPage() {
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               placeholder="https://..."
-              className="w-full border border-gray-200 px-3 py-2 text-sm text-gray-800 placeholder-gray-400 focus:border-gray-400 focus:outline-none"
+              className="w-full border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-800 placeholder-gray-400 focus:border-[#1565c0] focus:bg-white transition-colors"
             />
           </div>
         )}
 
-        {error && <p className="text-sm text-red-500 mb-4">{error}</p>}
+        {error && <p className="text-xs text-red-500 mb-4">{error}</p>}
 
         <button
           onClick={handleSubmit}
           disabled={submitting}
-          className="w-full bg-gray-900 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-gray-800 disabled:opacity-50"
+          className="w-full bg-[#1565c0] py-2.5 text-xs font-semibold text-white transition-colors hover:bg-[#0d47a1] disabled:opacity-50"
         >
           {submitting ? "Posting..." : "Post"}
         </button>

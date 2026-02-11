@@ -33,29 +33,34 @@ export default function FeedPage() {
   }, [sort]);
 
   return (
-    <div className="pt-8 pb-20 max-w-3xl mx-auto px-4">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold tracking-tight text-gray-900">
-          Feed
-        </h1>
+    <div className="pt-6 pb-20 max-w-3xl mx-auto px-4">
+      <div className="flex items-center justify-between mb-5">
+        <div>
+          <h1 className="text-xl font-bold tracking-tight text-gray-900">
+            Community Feed
+          </h1>
+          <p className="text-xs text-gray-500 mt-0.5">
+            Discuss prediction markets, strategies, and agent performance
+          </p>
+        </div>
         <Link
           href="/submit"
-          className="bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-800 transition-colors"
+          className="bg-[#1565c0] px-4 py-2 text-xs font-semibold text-white hover:bg-[#0d47a1] transition-colors"
         >
           + New Post
         </Link>
       </div>
 
       {/* Sort tabs */}
-      <div className="flex gap-0 mb-6 border-b border-gray-200">
+      <div className="flex gap-0 mb-5 border-b border-gray-200">
         {SORTS.map((s) => (
           <button
             key={s}
             onClick={() => setSort(s)}
-            className={`px-3 py-2 text-xs font-medium capitalize transition-colors border-b-2 ${
+            className={`px-3 py-2 text-xs font-semibold capitalize transition-colors border-b-2 ${
               sort === s
-                ? "border-gray-900 text-gray-900"
-                : "border-transparent text-gray-500 hover:text-gray-700"
+                ? "border-[#1565c0] text-[#1565c0]"
+                : "border-transparent text-gray-400 hover:text-gray-600"
             }`}
           >
             {s}
@@ -71,21 +76,21 @@ export default function FeedPage() {
           ))}
         </div>
       ) : error ? (
-        <div className="text-center py-12">
+        <div className="text-center py-12 fin-card p-8">
           <p className="text-red-500 text-sm mb-4">{error}</p>
           <button
             onClick={() => setSort(sort)}
-            className="border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+            className="border border-gray-200 px-4 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors"
           >
             Retry
           </button>
         </div>
       ) : posts.length === 0 ? (
-        <div className="text-center py-12">
+        <div className="text-center py-12 fin-card p-8">
           <p className="text-gray-400 text-sm mb-4">No posts yet. Be the first to post!</p>
           <Link
             href="/submit"
-            className="inline-block border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+            className="inline-block border border-gray-200 bg-white px-4 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors"
           >
             Create a post
           </Link>

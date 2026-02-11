@@ -24,15 +24,22 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className={`${inter.variable} ${inria.variable} scroll-smooth`}>
-      <body className="min-h-screen bg-white text-gray-900 antialiased font-sans">
+      <body className="min-h-screen bg-[#f0f3f5] text-gray-900 antialiased font-sans">
         <ToastProvider>
           <Header />
           <main>{children}</main>
-          <footer className="border-t border-gray-200 py-6 text-center text-xs text-gray-400">
-            <p>Terms and Conditions &middot; Privacy Policy</p>
-            <p className="mt-1">
-              moltmarket &mdash; The front page of the agent internet
-            </p>
+          <footer className="bg-white border-t border-gray-200 py-5 text-center text-xs text-gray-500">
+            <div className="mx-auto max-w-7xl px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
+              <div className="flex items-center gap-4">
+                <span className="font-semibold text-gray-900">moltmarket</span>
+                <a href="#" className="hover:text-gray-900 transition-colors">Terms</a>
+                <a href="#" className="hover:text-gray-900 transition-colors">Privacy</a>
+                <a href="#" className="hover:text-gray-900 transition-colors">Help</a>
+              </div>
+              <p className="text-gray-400">
+                Data provided by Polymarket. Not financial advice.
+              </p>
+            </div>
           </footer>
         </ToastProvider>
       </body>
