@@ -10,8 +10,8 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { kvGet, kvSet, kvLpush, kvLrange, kvIncr } from "@/lib/kv";
-import { listMarkets, getMarket, getMarketYesPrice, listEvents, getEvent } from "@/lib/polymarket";
+import * as db from "@/lib/db";
+import { listMarkets, getMarket, getMarketYesPrice, getEvent } from "@/lib/polymarket";
 import { authenticate } from "@/lib/social";
 import { getLeaderboard, getActivity } from "@/lib/benchmark";
 
@@ -42,11 +42,7 @@ const RATE_LIMIT_MAX = 200; // max predictions per hour per agent
 
 async function checkRateLimit(agentId: string): Promise<boolean> {
   const key = `ratelimit:predict:${agentId}:${Math.floor(Date.now() / 1000 / RATE_LIMIT_WINDOW)}`;
-  const count = await kvIncr(key);
-  // Set expiry on first increment (best-effort, KV may not support TTL on incr)
-  if (count === 1) {
-    await kvSet(key, count, RATE_LIMIT_WINDOW + 60);
-  }
+  const count = await db.dbRateLimitIncr(key, RATE_LIMIT_WINDOW);
   return count <= RATE_LIMIT_MAX;
 }
 
@@ -218,8 +214,9 @@ async function executeTool(
         // Market not found or API error: trade still recorded, benchmark falls back to legacy PnL
       }
 
+      const tradeId = `trade-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const trade: Record<string, unknown> = {
-        id: `trade-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        id: tradeId,
         agent_id: agentId,
         agent_name: authAgent.name as string,
         side: sideLower,
@@ -232,15 +229,10 @@ async function executeTool(
         price_at_submit: price_at_submit ?? undefined,
       };
 
-      // Write trade data (best-effort atomicity)
-      await kvSet(`trade:${trade.id}`, trade);
-      await kvLpush("trades:all", trade.id);
-      await kvLpush(`trades:agent:${agentId}`, trade.id);
-
-      const agent = await kvGet<Record<string, unknown>>(`agent:${agentId}`);
+      await db.dbTradeInsert(trade);
+      const agent = await db.dbAgentGetById(agentId);
       if (agent) {
-        agent.trade_count = ((agent.trade_count as number) || 0) + 1;
-        await kvSet(`agent:${agentId}`, agent);
+        await db.dbAgentUpdate(agentId, { trade_count: ((agent.trade_count as number) || 0) + 1 });
       }
 
       return trade;
@@ -249,17 +241,7 @@ async function executeTool(
     case "get_my_trades": {
       if (!authAgent) throw new Error("Authentication required.");
       const limit = Math.min(Math.max(Number(args.limit) || 50, 1), 200);
-      const tradeIds = await kvLrange<string>(
-        `trades:agent:${authAgent.id}`,
-        0,
-        limit - 1
-      );
-      const trades = [];
-      for (const tid of tradeIds) {
-        const key = typeof tid === "string" ? `trade:${tid}` : `trade:${JSON.stringify(tid)}`;
-        const trade = await kvGet(key);
-        if (trade) trades.push(trade);
-      }
+      const trades = await db.dbTradeGetByAgentId(authAgent.id as string, limit);
       return trades;
     }
 

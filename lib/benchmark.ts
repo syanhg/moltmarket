@@ -4,7 +4,7 @@
  * No real money: simulated $10k per agent, real prices and outcomes for scoring.
  */
 
-import { kvGet, kvSet, kvLrange } from "./kv";
+import * as db from "./db";
 import { listAgents } from "./social";
 import { getMarketResolution } from "./polymarket";
 import { computeTradePnl } from "./resolution";
@@ -40,7 +40,12 @@ async function resolveUnresolvedTrades(
       trade.outcome_yes = outcomeYes;
       trade.pnl_realized = Math.round(pnlRealized * 100) / 100;
       trade.resolved_at = Math.floor(Date.now() / 1000);
-      await kvSet(`trade:${trade.id}`, trade);
+      await db.dbTradeUpdate(trade.id as string, {
+        resolved: true,
+        outcome_yes: outcomeYes,
+        pnl_realized: trade.pnl_realized,
+        resolved_at: trade.resolved_at,
+      });
     }
   }
 }
@@ -56,15 +61,9 @@ export async function getLeaderboard(): Promise<Record<string, unknown>[]> {
 
   for (const agent of agents) {
     const agentId = (agent.id as string) || "";
-    const tradeIds = await kvLrange<string>(`trades:agent:${agentId}`, 0, -1);
-    const trades: Record<string, unknown>[] = [];
+    const trades = await db.dbTradeListByAgentId(agentId);
 
-    for (const tid of tradeIds) {
-      if (typeof tid !== "string") continue;
-      const t = await kvGet<Record<string, unknown>>(`trade:${tid}`);
-      if (!t) continue;
-      trades.push(t);
-
+    for (const t of trades) {
       const mid = t.market_id as string | undefined;
       if (mid && t.resolved !== true) {
         const list = marketToTrades.get(mid) ?? [];
@@ -148,15 +147,7 @@ export async function getPerformanceHistory(
 
   for (const agent of agents) {
     const agentId = (agent.id as string) || "";
-    const tradeIds = await kvLrange<string>(`trades:agent:${agentId}`, 0, -1);
-
-    const trades: Record<string, unknown>[] = [];
-    for (const tid of tradeIds) {
-      if (typeof tid === "string") {
-        const t = await kvGet<Record<string, unknown>>(`trade:${tid}`);
-        if (t) trades.push(t);
-      }
-    }
+    const trades = await db.dbTradeListByAgentId(agentId);
 
     trades.sort(
       (a, b) => ((a.timestamp as number) || 0) - ((b.timestamp as number) || 0)
@@ -195,13 +186,5 @@ export async function getPerformanceHistory(
 export async function getActivity(
   limit = 50
 ): Promise<Record<string, unknown>[]> {
-  const tradeIds = await kvLrange<string>("trades:all", 0, limit - 1);
-  const trades: Record<string, unknown>[] = [];
-  for (const tid of tradeIds) {
-    if (typeof tid === "string") {
-      const t = await kvGet<Record<string, unknown>>(`trade:${tid}`);
-      if (t) trades.push(t);
-    }
-  }
-  return trades;
+  return db.dbTradeGetAll(limit);
 }

@@ -4,7 +4,7 @@
  */
 
 import { getMarketResolution } from "./polymarket";
-import { kvGet, kvSet } from "./kv";
+import * as db from "./db";
 
 /** Compute realized PnL for a binary trade. Uses price_at_submit when available. */
 export function computeTradePnl(
@@ -41,15 +41,14 @@ export async function resolveTrade(
   if (!closed || outcomeYes === null) return false;
 
   const pnlRealized = computeTradePnl(trade, outcomeYes);
-  const updated: Record<string, unknown> = {
-    ...trade,
+  const resolvedAt = Math.floor(Date.now() / 1000);
+  const pnlRounded = Math.round(pnlRealized * 100) / 100;
+  await db.dbTradeUpdate(trade.id as string, {
     resolved: true,
     outcome_yes: outcomeYes,
-    pnl_realized: Math.round(pnlRealized * 100) / 100,
-    resolved_at: Math.floor(Date.now() / 1000),
-  };
-
-  await kvSet(`trade:${trade.id}`, updated);
+    pnl_realized: pnlRounded,
+    resolved_at: resolvedAt,
+  });
   return true;
 }
 
@@ -66,19 +65,17 @@ export async function resolveTradesForMarket(
 
   let updated = 0;
   for (const tid of tradeIds) {
-    const trade = await kvGet<Record<string, unknown>>(`trade:${tid}`);
+    const trade = await db.dbTradeGetById(tid);
     if (!trade || trade.resolved === true || trade.market_id !== marketId)
       continue;
 
     const pnlRealized = computeTradePnl(trade, outcomeYes);
-    const resolvedTrade: Record<string, unknown> = {
-      ...trade,
+    await db.dbTradeUpdate(tid, {
       resolved: true,
       outcome_yes: outcomeYes,
       pnl_realized: Math.round(pnlRealized * 100) / 100,
       resolved_at: Math.floor(Date.now() / 1000),
-    };
-    await kvSet(`trade:${tid}`, resolvedTrade);
+    });
     updated++;
   }
   return updated;

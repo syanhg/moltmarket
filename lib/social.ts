@@ -1,11 +1,10 @@
 /**
  * Social features: agent registration/auth, posts, comments, voting, follows.
- *
- * All data stored in Vercel KV via lib/kv.ts.
+ * Data stored via lib/db.ts (Supabase or Vercel KV).
  */
 
 import { createHash, randomBytes, randomUUID } from "crypto";
-import { kvGet, kvSet, kvDel, kvKeys, kvLpush, kvLrange } from "./kv";
+import * as db from "./db";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -87,7 +86,7 @@ export async function registerAgent(
   }
 
   // Check if name is taken
-  const existing = await kvGet<string>(`agent_name:${name}`);
+  const existing = await db.dbAgentGetByName(name);
   if (existing) {
     throw new Error("Agent name is already taken");
   }
@@ -117,9 +116,21 @@ export async function registerAgent(
     created_at: Date.now() / 1000,
   };
 
-  await kvSet(`agent:${agentId}`, agent);
-  await kvSet(`agent_name:${name}`, agentId);
-  await kvSet(`agent_key:${hashApiKey(apiKey)}`, agentId);
+  await db.dbAgentInsert({
+    id: agentId,
+    name: agent.name,
+    api_key_hash: agent.api_key_hash,
+    mcp_url: agent.mcp_url,
+    description: agent.description,
+    color: agent.color,
+    status: agent.status,
+    karma: agent.karma,
+    follower_count: agent.follower_count,
+    following_count: agent.following_count,
+    post_count: agent.post_count,
+    trade_count: agent.trade_count,
+    created_at: agent.created_at,
+  });
 
   return { ...agent, api_key: apiKey };
 }
@@ -127,58 +138,46 @@ export async function registerAgent(
 export async function authenticate(apiKey: string): Promise<AgentRecord | null> {
   if (!apiKey || !apiKey.startsWith("moltbook_")) return null;
   const keyHash = hashApiKey(apiKey);
-  const agentId = await kvGet<string>(`agent_key:${keyHash}`);
-  if (!agentId) return null;
-  return kvGet<AgentRecord>(`agent:${agentId}`);
+  const agent = await db.dbAgentGetByApiKeyHash(keyHash);
+  return agent as AgentRecord | null;
 }
 
 export async function getAgentByName(name: string): Promise<AgentRecord | null> {
-  const agentId = await kvGet<string>(`agent_name:${name}`);
-  if (!agentId) return null;
-  return kvGet<AgentRecord>(`agent:${agentId}`);
+  const agent = await db.dbAgentGetByName(name);
+  return agent as AgentRecord | null;
 }
 
 export async function getAgentById(agentId: string): Promise<AgentRecord | null> {
-  return kvGet<AgentRecord>(`agent:${agentId}`);
+  const agent = await db.dbAgentGetById(agentId);
+  return agent as AgentRecord | null;
 }
 
 export async function listAgents(): Promise<Record<string, unknown>[]> {
-  const keys = await kvKeys("agent:*");
-  const agents: Record<string, unknown>[] = [];
-  for (const k of keys) {
-    if (k.startsWith("agent:") && !k.startsWith("agent_name:") && !k.startsWith("agent_key:")) {
-      const a = await kvGet<Record<string, unknown>>(k);
-      if (a && typeof a === "object") {
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const { api_key_hash: _, ...safe } = a;
-        agents.push(safe);
-      }
-    }
-  }
-  return agents;
+  return db.dbAgentList();
 }
 
 export async function updateAgent(
   agentId: string,
   updates: Record<string, unknown>
 ): Promise<AgentRecord | null> {
-  const agent = await kvGet<AgentRecord>(`agent:${agentId}`);
+  const agent = await db.dbAgentGetById(agentId);
   if (!agent) return null;
   const allowed = new Set(["description", "mcp_url", "display_name"]);
+  const toUpdate: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(updates)) {
     if (allowed.has(k)) {
       if (k === "description" && typeof v === "string") {
-        (agent as Record<string, unknown>)[k] = sanitize(v, 500);
+        toUpdate[k] = sanitize(v, 500);
       } else if (k === "mcp_url" && typeof v === "string") {
-        if (!isValidUrl(v)) continue; // skip invalid URLs
-        (agent as Record<string, unknown>)[k] = v;
+        if (!isValidUrl(v)) continue;
+        toUpdate[k] = v;
       } else {
-        (agent as Record<string, unknown>)[k] = v;
+        toUpdate[k] = v;
       }
     }
   }
-  await kvSet(`agent:${agentId}`, agent);
-  return agent;
+  if (Object.keys(toUpdate).length) await db.dbAgentUpdate(agentId, toUpdate);
+  return { ...agent, ...toUpdate } as AgentRecord;
 }
 
 // ---------------------------------------------------------------------------
@@ -193,8 +192,7 @@ export async function followAgent(
     throw new Error("Cannot follow yourself");
   }
 
-  const followKey = `follow:${followerId}:${targetId}`;
-  const already = await kvGet<boolean>(followKey);
+  const already = await db.dbFollowExists(followerId, targetId);
   if (already) {
     throw new Error("Already following this agent");
   }
@@ -204,16 +202,11 @@ export async function followAgent(
   const follower = await getAgentById(followerId);
   if (!follower) throw new Error("Follower agent not found");
 
-  // Mark follow
-  await kvSet(followKey, true);
-  await kvLpush(`followers:${targetId}`, followerId);
-  await kvLpush(`following:${followerId}`, targetId);
-
-  // Update counts
+  await db.dbFollowAdd(followerId, targetId);
+  await db.dbAgentUpdate(targetId, { follower_count: (target.follower_count || 0) + 1 });
+  await db.dbAgentUpdate(followerId, { following_count: (follower.following_count || 0) + 1 });
   target.follower_count = (target.follower_count || 0) + 1;
   follower.following_count = (follower.following_count || 0) + 1;
-  await kvSet(`agent:${targetId}`, target);
-  await kvSet(`agent:${followerId}`, follower);
 
   return { success: true, follower_count: target.follower_count };
 }
@@ -222,8 +215,7 @@ export async function unfollowAgent(
   followerId: string,
   targetId: string
 ): Promise<{ success: boolean; follower_count: number }> {
-  const followKey = `follow:${followerId}:${targetId}`;
-  const isFollowing = await kvGet<boolean>(followKey);
+  const isFollowing = await db.dbFollowExists(followerId, targetId);
   if (!isFollowing) {
     throw new Error("Not following this agent");
   }
@@ -233,14 +225,13 @@ export async function unfollowAgent(
   const follower = await getAgentById(followerId);
   if (!follower) throw new Error("Follower agent not found");
 
-  // Remove follow
-  await kvDel(followKey);
-
-  // Update counts (floor at 0)
-  target.follower_count = Math.max((target.follower_count || 0) - 1, 0);
-  follower.following_count = Math.max((follower.following_count || 0) - 1, 0);
-  await kvSet(`agent:${targetId}`, target);
-  await kvSet(`agent:${followerId}`, follower);
+  await db.dbFollowRemove(followerId, targetId);
+  const newFollowerCount = Math.max((target.follower_count || 0) - 1, 0);
+  const newFollowingCount = Math.max((follower.following_count || 0) - 1, 0);
+  await db.dbAgentUpdate(targetId, { follower_count: newFollowerCount });
+  await db.dbAgentUpdate(followerId, { following_count: newFollowingCount });
+  target.follower_count = newFollowerCount;
+  follower.following_count = newFollowingCount;
 
   return { success: true, follower_count: target.follower_count };
 }
@@ -249,8 +240,7 @@ export async function isFollowing(
   followerId: string,
   targetId: string
 ): Promise<boolean> {
-  const val = await kvGet<boolean>(`follow:${followerId}:${targetId}`);
-  return !!val;
+  return db.dbFollowExists(followerId, targetId);
 }
 
 // ---------------------------------------------------------------------------
@@ -324,21 +314,34 @@ export async function createPost(
     created_at: now,
   };
 
-  await kvSet(`post:${postId}`, post);
-  await kvLpush("posts:all", postId);
-  await kvLpush(`posts:submolt:${cleanSubmolt}`, postId);
-  await kvLpush(`posts:author:${authorId}`, postId);
+  await db.dbPostInsert({
+    id: postId,
+    author_id: post.author_id,
+    author_name: post.author_name,
+    author_color: post.author_color,
+    submolt: post.submolt,
+    title: post.title,
+    content: post.content,
+    url: post.url,
+    post_type: post.post_type,
+    score: post.score,
+    upvotes: post.upvotes,
+    downvotes: post.downvotes,
+    comment_count: post.comment_count,
+    created_at: post.created_at,
+  });
 
   if (author) {
+    await db.dbAgentUpdate(authorId, { post_count: (author.post_count || 0) + 1 });
     author.post_count = (author.post_count || 0) + 1;
-    await kvSet(`agent:${authorId}`, author);
   }
 
   return post;
 }
 
 export async function getPost(postId: string): Promise<PostRecord | null> {
-  return kvGet<PostRecord>(`post:${postId}`);
+  const p = await db.dbPostGetById(postId);
+  return p as PostRecord | null;
 }
 
 export async function listPosts(
@@ -346,41 +349,8 @@ export async function listPosts(
   limit = 25,
   submolt?: string | null
 ): Promise<PostRecord[]> {
-  const listKey = submolt ? `posts:submolt:${submolt}` : "posts:all";
-  const postIds = await kvLrange<string>(listKey, 0, 200);
-
-  const posts: PostRecord[] = [];
-  for (const pid of postIds) {
-    if (typeof pid === "string") {
-      const p = await kvGet<PostRecord>(`post:${pid}`);
-      if (p) posts.push(p);
-    }
-  }
-
-  const now = Date.now() / 1000;
-
-  if (sort === "new") {
-    posts.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
-  } else if (sort === "top") {
-    posts.sort((a, b) => (b.score || 0) - (a.score || 0));
-  } else if (sort === "rising") {
-    const risingScore = (p: PostRecord) => {
-      const hours = (now - (p.created_at || now)) / 3600;
-      return ((p.score || 0) + 1) / Math.pow(hours + 2, 1.5);
-    };
-    posts.sort((a, b) => risingScore(b) - risingScore(a));
-  } else {
-    // hot (default)
-    const hotScore = (p: PostRecord) => {
-      const s = p.score || 0;
-      const sign = s > 0 ? 1 : s < 0 ? -1 : 0;
-      const order = Math.log10(Math.max(Math.abs(s), 1));
-      return sign * order + (p.created_at || now) / 45000;
-    };
-    posts.sort((a, b) => hotScore(b) - hotScore(a));
-  }
-
-  return posts.slice(0, limit);
+  const rows = await db.dbPostList(sort, limit, submolt ?? undefined);
+  return rows as PostRecord[];
 }
 
 // ---------------------------------------------------------------------------
@@ -418,8 +388,8 @@ export async function createComment(
 
   let parentDepth = 0;
   if (parentId) {
-    const parent = await kvGet<CommentRecord>(`comment:${parentId}`);
-    if (parent) parentDepth = parent.depth || 0;
+    const parent = await db.dbCommentGetById(parentId);
+    if (parent) parentDepth = (parent.depth as number) || 0;
   }
 
   const comment: CommentRecord = {
@@ -437,13 +407,24 @@ export async function createComment(
     created_at: Date.now() / 1000,
   };
 
-  await kvSet(`comment:${commentId}`, comment);
-  await kvLpush(`comments:post:${postId}`, commentId);
+  await db.dbCommentInsert({
+    id: comment.id,
+    post_id: comment.post_id,
+    author_id: comment.author_id,
+    author_name: comment.author_name,
+    author_color: comment.author_color,
+    parent_id: comment.parent_id,
+    content: comment.content,
+    score: comment.score,
+    upvotes: comment.upvotes,
+    downvotes: comment.downvotes,
+    depth: comment.depth,
+    created_at: comment.created_at,
+  });
 
   const post = await getPost(postId);
   if (post) {
-    post.comment_count = (post.comment_count || 0) + 1;
-    await kvSet(`post:${postId}`, post);
+    await db.dbPostUpdate(postId, { comment_count: (post.comment_count || 0) + 1 });
   }
 
   return comment;
@@ -453,14 +434,8 @@ export async function listComments(
   postId: string,
   sort = "top"
 ): Promise<CommentRecord[]> {
-  const commentIds = await kvLrange<string>(`comments:post:${postId}`, 0, -1);
-  const comments: CommentRecord[] = [];
-  for (const cid of commentIds) {
-    if (typeof cid === "string") {
-      const c = await kvGet<CommentRecord>(`comment:${cid}`);
-      if (c) comments.push(c);
-    }
-  }
+  const rows = await db.dbCommentListByPostId(postId);
+  const comments = rows as CommentRecord[];
 
   if (sort === "new") {
     comments.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
@@ -497,56 +472,47 @@ export async function voteOn(
   agentId: string,
   value: 1 | -1
 ): Promise<Record<string, unknown> | null> {
-  const voteKey = `vote:${agentId}:${targetType}:${targetId}`;
-  const prefix = targetType === "post" ? "post" : "comment";
-
-  // Re-read target fresh each time to minimize stale data
-  const target = await kvGet<Record<string, unknown>>(`${prefix}:${targetId}`);
+  const target =
+    targetType === "post"
+      ? await db.dbPostGetById(targetId)
+      : await db.dbCommentGetById(targetId);
   if (!target) return null;
 
-  const prevVote = (await kvGet<number>(voteKey)) || 0;
+  const prevVote = await db.dbVoteGet(agentId, targetType, targetId);
 
-  // Calculate new upvotes/downvotes from scratch based on current state
   let upvotes = Math.max((target.upvotes as number) || 0, 0);
   let downvotes = Math.max((target.downvotes as number) || 0, 0);
 
-  // Remove previous vote effect
   if (prevVote === 1) {
     upvotes = Math.max(upvotes - 1, 0);
   } else if (prevVote === -1) {
     downvotes = Math.max(downvotes - 1, 0);
   }
 
-  // Apply new vote (toggle off if same)
   let newVote = 0;
   if (prevVote === value) {
-    // Toggle off
-    await kvDel(voteKey);
+    await db.dbVoteSet(agentId, targetType, targetId, 0);
   } else {
-    // Apply
-    if (value === 1) {
-      upvotes += 1;
-    } else if (value === -1) {
-      downvotes += 1;
-    }
-    await kvSet(voteKey, value);
+    if (value === 1) upvotes += 1;
+    else if (value === -1) downvotes += 1;
+    await db.dbVoteSet(agentId, targetType, targetId, value);
     newVote = value;
   }
 
-  // Update target
-  target.upvotes = upvotes;
-  target.downvotes = downvotes;
-  target.score = upvotes - downvotes;
-  await kvSet(`${prefix}:${targetId}`, target);
+  const updates = { upvotes, downvotes, score: upvotes - downvotes };
+  if (targetType === "post") {
+    await db.dbPostUpdate(targetId, updates);
+  } else {
+    await db.dbCommentUpdate(targetId, updates);
+  }
+  Object.assign(target, updates);
 
-  // Update author karma
   const authorId = target.author_id as string;
   if (authorId) {
     const author = await getAgentById(authorId);
     if (author) {
       const karmaDelta = newVote - (prevVote || 0);
-      author.karma = Math.max((author.karma || 0) + karmaDelta, 0);
-      await kvSet(`agent:${author.id}`, author);
+      await db.dbAgentUpdate(author.id, { karma: Math.max((author.karma || 0) + karmaDelta, 0) });
     }
   }
 
@@ -559,6 +525,5 @@ export async function getUserVote(
   targetId: string,
   agentId: string
 ): Promise<number> {
-  const voteKey = `vote:${agentId}:${targetType}:${targetId}`;
-  return (await kvGet<number>(voteKey)) || 0;
+  return db.dbVoteGet(agentId, targetType, targetId);
 }
