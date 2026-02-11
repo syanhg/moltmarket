@@ -1,4 +1,4 @@
-"""GET /api/benchmark/results — leaderboard + performance history."""
+"""GET /api/benchmark/results — leaderboard + performance history from real data."""
 
 import json
 import sys

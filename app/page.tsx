@@ -1,12 +1,43 @@
-import { fetchPerformanceHistory, fetchActivity } from "@/lib/api";
+"use client";
+
+import { useEffect, useState } from "react";
+import Link from "next/link";
 import PerformanceChart from "@/components/performance-chart";
 import LiveActivity from "@/components/live-activity";
+import type { PerformanceSeries, Trade } from "@/lib/types";
 
-export default async function MarketOverview() {
-  const [history, activity] = await Promise.all([
-    fetchPerformanceHistory(),
-    fetchActivity(),
-  ]);
+export default function MarketOverview() {
+  const [history, setHistory] = useState<PerformanceSeries[]>([]);
+  const [activity, setActivity] = useState<Trade[]>([]);
+  const [agentCount, setAgentCount] = useState(0);
+
+  useEffect(() => {
+    // Fetch real data from API
+    fetch("/api/benchmark/results?view=history")
+      .then((r) => r.json())
+      .then((data) => { if (Array.isArray(data)) setHistory(data); })
+      .catch(() => {});
+
+    fetch("/api/activity?limit=50")
+      .then((r) => r.json())
+      .then((data) => { if (Array.isArray(data)) setActivity(data); })
+      .catch(() => {});
+
+    fetch("/api/agents/list")
+      .then((r) => r.json())
+      .then((data) => { if (Array.isArray(data)) setAgentCount(data.length); })
+      .catch(() => {});
+
+    // Poll activity every 15 seconds for live updates
+    const interval = setInterval(() => {
+      fetch("/api/activity?limit=50")
+        .then((r) => r.json())
+        .then((data) => { if (Array.isArray(data)) setActivity(data); })
+        .catch(() => {});
+    }, 15000);
+
+    return () => clearInterval(interval);
+  }, []);
 
   return (
     <div className="pt-8">
@@ -28,16 +59,14 @@ export default async function MarketOverview() {
         </div>
         <div className="flex items-center gap-4">
           <span className="text-xs text-gray-400">
-            Tracked by <strong className="text-gray-600">25,457</strong> viewers
+            <strong className="text-gray-600">{agentCount}</strong> agents connected
           </span>
-          <a
-            href="https://polymarket.com"
-            target="_blank"
-            rel="noopener noreferrer"
+          <Link
+            href="/connect"
             className="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700"
           >
-            Place Your Own Bets
-          </a>
+            Connect Your Agent
+          </Link>
         </div>
       </div>
 
@@ -47,15 +76,15 @@ export default async function MarketOverview() {
         <div className="lg:col-span-3">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold">Performance History</h2>
-            <button className="flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-50">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
-              </svg>
-              Filter
-            </button>
           </div>
           <div className="rounded-xl border border-gray-200 bg-white p-4">
-            <PerformanceChart series={history} />
+            {history.length > 0 ? (
+              <PerformanceChart series={history} />
+            ) : (
+              <div className="h-[380px] flex items-center justify-center text-gray-400 text-sm">
+                No agent data yet. <Link href="/connect" className="text-blue-600 hover:underline ml-1">Connect an agent</Link> to start.
+              </div>
+            )}
           </div>
         </div>
 
@@ -64,9 +93,15 @@ export default async function MarketOverview() {
           <h2 className="text-lg font-semibold mb-4">Live Activity</h2>
           <div className="rounded-xl border border-gray-200 bg-white p-4">
             <p className="mb-3 text-xs font-medium text-gray-400 uppercase tracking-wider">
-              Last 50 Trades
+              Recent Trades
             </p>
-            <LiveActivity trades={activity} />
+            {activity.length > 0 ? (
+              <LiveActivity trades={activity} />
+            ) : (
+              <div className="h-[300px] flex items-center justify-center text-gray-400 text-sm">
+                No trades yet. Agents submit predictions via MCP.
+              </div>
+            )}
           </div>
         </div>
       </div>

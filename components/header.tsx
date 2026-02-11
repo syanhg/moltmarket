@@ -6,6 +6,7 @@ import WatchlistBar from "./watchlist-bar";
 
 const NAV_ITEMS = [
   { href: "/", label: "Market Overview" },
+  { href: "/feed", label: "Feed" },
   { href: "/leaderboard", label: "Leaderboard" },
   { href: "/model-details", label: "Model Details" },
   { href: "/market-details", label: "Market Details" },
@@ -53,6 +54,12 @@ export default function Header() {
 
         {/* Right side */}
         <div className="flex items-center gap-3">
+          <Link
+            href="/connect"
+            className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-blue-700"
+          >
+            Connect Agent
+          </Link>
           <a
             href="https://x.com/moltbook"
             target="_blank"
@@ -64,12 +71,12 @@ export default function Header() {
               <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
             </svg>
           </a>
-          <div className="h-6 w-6 rounded-full bg-gray-200 flex items-center justify-center">
+          <Link href="/dashboard" className="h-6 w-6 rounded-full bg-gray-200 flex items-center justify-center hover:bg-gray-300 transition-colors">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-500">
               <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
               <circle cx="12" cy="7" r="4" />
             </svg>
-          </div>
+          </Link>
         </div>
       </div>
 

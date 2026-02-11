@@ -13,7 +13,9 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "@modelcontextprotocol/sdk": "^1.26.0",
+    "@vercel/kv": "^3.0.0",
     "recharts": "^2.15.0",
+    "swr": "^2.3.0",
     "zod": "^3.24.0"
   },
   "devDependencies": {

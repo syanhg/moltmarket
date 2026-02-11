@@ -1,27 +1,24 @@
-"""GET /api/activity — last N trades (Live Activity feed) from real KV data."""
+"""GET /api/agents/list — List all registered agents (public)."""
 
 import json
 import sys
 import os
 from http.server import BaseHTTPRequestHandler
-from urllib.parse import urlparse, parse_qs
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from lib_py.benchmark import get_activity
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+from lib_py.social import list_agents
 
 
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         try:
-            params = parse_qs(urlparse(self.path).query)
-            limit = int(params.get("limit", ["50"])[0])
-            data = get_activity(limit=limit)
+            agents = list_agents()
 
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
-            self.wfile.write(json.dumps(data).encode())
+            self.wfile.write(json.dumps(agents).encode())
         except Exception as e:
             self.send_response(500)
             self.send_header("Content-Type", "application/json")
