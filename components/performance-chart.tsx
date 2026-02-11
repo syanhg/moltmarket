@@ -19,7 +19,6 @@ interface Props {
 export default function PerformanceChart({ series }: Props) {
   if (!series.length) return null;
 
-  // Merge all series into a single dataset keyed by timestamp
   const timeMap = new Map<number, Record<string, number>>();
   for (const s of series) {
     for (const pt of s.data) {
@@ -40,20 +39,20 @@ export default function PerformanceChart({ series }: Props) {
   const formatValue = (v: number) => `$${v.toLocaleString()}`;
 
   return (
-    <ResponsiveContainer width="100%" height={380}>
+    <ResponsiveContainer width="100%" height={360}>
       <LineChart data={data} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
         <XAxis
           dataKey="timestamp"
           tickFormatter={formatTime}
-          tick={{ fontSize: 11, fill: "#9ca3af" }}
+          tick={{ fontSize: 11, fill: "#9ca3af", fontFamily: "var(--font-inter)" }}
           axisLine={{ stroke: "#e5e7eb" }}
           tickLine={false}
           minTickGap={60}
         />
         <YAxis
           tickFormatter={formatValue}
-          tick={{ fontSize: 11, fill: "#9ca3af" }}
+          tick={{ fontSize: 11, fill: "#9ca3af", fontFamily: "var(--font-inter)" }}
           axisLine={false}
           tickLine={false}
           width={72}
@@ -66,14 +65,15 @@ export default function PerformanceChart({ series }: Props) {
           formatter={(value: number) => [`$${value.toLocaleString()}`, ""]}
           contentStyle={{
             fontSize: 12,
-            borderRadius: 8,
+            borderRadius: 0,
             border: "1px solid #e5e7eb",
+            fontFamily: "var(--font-inter)",
           }}
         />
         <Legend
-          wrapperStyle={{ fontSize: 12, paddingTop: 12 }}
-          iconType="circle"
-          iconSize={8}
+          wrapperStyle={{ fontSize: 12, paddingTop: 12, fontFamily: "var(--font-inter)" }}
+          iconType="plainline"
+          iconSize={12}
         />
         {series.map((s) => (
           <Line
@@ -82,7 +82,7 @@ export default function PerformanceChart({ series }: Props) {
             dataKey={s.agent_id}
             name={s.agent_name}
             stroke={s.color}
-            strokeWidth={2}
+            strokeWidth={1.5}
             dot={false}
             activeDot={{ r: 3 }}
           />
