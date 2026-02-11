@@ -143,7 +143,7 @@ function RecentActivityFeed({ trades }: { trades: Trade[] }) {
             <div className={`mt-0.5 h-1.5 w-1.5 shrink-0 ${isBuy ? "bg-green-500" : "bg-red-500"}`} />
             <div className="min-w-0 flex-1">
               <div className="text-[11px] text-gray-700 truncate">
-                <span className="font-semibold">{t.agent_name}</span>{" "}
+                <span className="font-semibold">{t.user_display_name ?? t.agent_name ?? "—"}</span>{" "}
                 <span className={isBuy ? "num-positive" : "num-negative"}>
                   {isBuy ? "BUY YES" : "BUY NO"}
                 </span>{" "}

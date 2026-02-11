@@ -65,10 +65,19 @@ export interface CommentRow {
   created_at: string;
 }
 
+export interface ProfileRow {
+  id: string;
+  display_name: string | null;
+  handle: string | null;
+  created_at: string;
+}
+
 export interface TradeRow {
   id: string;
-  agent_id: string;
-  agent_name: string;
+  agent_id: string | null;
+  agent_name: string | null;
+  user_id: string | null;
+  user_display_name: string | null;
   side: string;
   ticker: string;
   market_id: string | null;
@@ -144,8 +153,10 @@ function commentRowToRecord(r: CommentRow): Record<string, unknown> {
 function tradeRowToRecord(r: TradeRow): Record<string, unknown> {
   return {
     id: r.id,
-    agent_id: r.agent_id,
-    agent_name: r.agent_name,
+    agent_id: r.agent_id ?? undefined,
+    agent_name: r.agent_name ?? undefined,
+    user_id: r.user_id ?? undefined,
+    user_display_name: r.user_display_name ?? undefined,
     side: r.side,
     ticker: r.ticker,
     market_id: r.market_id ?? undefined,
@@ -506,6 +517,42 @@ export async function dbVoteSet(agentId: string, targetType: string, targetId: s
 }
 
 // ---------------------------------------------------------------------------
+// Profiles (human users; id = auth.users.id)
+// ---------------------------------------------------------------------------
+
+export async function dbProfileGetById(id: string): Promise<Record<string, unknown> | null> {
+  if (hasSupabase()) {
+    const { data, error } = await table("profiles").select("*").eq("id", id).maybeSingle();
+    if (error || !data) return null;
+    const r = data as ProfileRow;
+    return {
+      id: r.id,
+      display_name: r.display_name ?? undefined,
+      handle: r.handle ?? undefined,
+      created_at: new Date(r.created_at).getTime() / 1000,
+    };
+  }
+  return null;
+}
+
+export async function dbProfileUpsert(profile: {
+  id: string;
+  display_name?: string | null;
+  handle?: string | null;
+}): Promise<void> {
+  if (hasSupabase()) {
+    await table("profiles").upsert(
+      {
+        id: profile.id,
+        display_name: profile.display_name ?? null,
+        handle: profile.handle ?? null,
+      },
+      { onConflict: "id" }
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Trades
 // ---------------------------------------------------------------------------
 
@@ -513,8 +560,10 @@ export async function dbTradeInsert(trade: Record<string, unknown>): Promise<voi
   if (hasSupabase()) {
     await table("trades").insert({
       id: trade.id,
-      agent_id: trade.agent_id,
-      agent_name: trade.agent_name,
+      agent_id: trade.agent_id ?? null,
+      agent_name: trade.agent_name ?? null,
+      user_id: trade.user_id ?? null,
+      user_display_name: trade.user_display_name ?? null,
       side: trade.side,
       ticker: trade.ticker,
       market_id: trade.market_id ?? null,
@@ -531,7 +580,8 @@ export async function dbTradeInsert(trade: Record<string, unknown>): Promise<voi
   }
   await kv.kvSet(`trade:${trade.id}`, trade);
   await kv.kvLpush("trades:all", trade.id);
-  await kv.kvLpush(`trades:agent:${trade.agent_id}`, trade.id);
+  const aid = trade.agent_id as string | undefined;
+  if (aid) await kv.kvLpush(`trades:agent:${aid}`, trade.id);
 }
 
 export async function dbTradeGetByAgentId(agentId: string, limit: number): Promise<Record<string, unknown>[]> {
@@ -574,6 +624,16 @@ export async function dbTradeListByAgentId(agentId: string): Promise<Record<stri
     if (t) trades.push(t);
   }
   return trades;
+}
+
+export async function dbTradeListByUserId(userId: string, limit?: number): Promise<Record<string, unknown>[]> {
+  if (hasSupabase()) {
+    let q = table("trades").select("*").eq("user_id", userId).order("created_at", { ascending: false });
+    if (limit != null) q = q.limit(limit);
+    const { data } = await q;
+    return (data || []).map((r: TradeRow) => tradeRowToRecord(r));
+  }
+  return [];
 }
 
 export async function dbTradeGetById(id: string): Promise<Record<string, unknown> | null> {

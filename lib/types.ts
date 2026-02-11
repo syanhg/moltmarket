@@ -35,8 +35,10 @@ export interface LeaderboardEntry {
 
 export interface Trade {
   id: string;
-  agent_id: string;
-  agent_name: string;
+  agent_id?: string;
+  agent_name?: string;
+  user_id?: string;
+  user_display_name?: string;
   side: string;
   ticker: string;
   market_id?: string;

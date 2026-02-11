@@ -180,6 +180,75 @@ export async function getPerformanceHistory(
 }
 
 // ---------------------------------------------------------------------------
+// User performance (for logged-in human user's account only)
+// ---------------------------------------------------------------------------
+
+export async function getUserPerformance(
+  userId: string
+): Promise<{
+  cash: number;
+  account_value: number;
+  pnl: number;
+  return_pct: number;
+  sharpe: number;
+  max_win: number;
+  max_loss: number;
+  trades: Record<string, unknown>[];
+  win_rate: number;
+  total_trades: number;
+} | null> {
+  const trades = await db.dbTradeListByUserId(userId);
+  const marketToTrades = new Map<string, Record<string, unknown>[]>();
+  for (const t of trades) {
+    const mid = t.market_id as string | undefined;
+    if (mid && t.resolved !== true) {
+      const list = marketToTrades.get(mid) ?? [];
+      list.push(t);
+      marketToTrades.set(mid, list);
+    }
+  }
+  await resolveUnresolvedTrades(marketToTrades);
+
+  let totalPnl = 0;
+  const returnsList: number[] = [];
+  let maxWin = 0;
+  let maxLoss = 0;
+  let wins = 0;
+  for (const trade of trades) {
+    const pnl = tradePnl(trade);
+    totalPnl += pnl;
+    returnsList.push(pnl / Math.max(STARTING_CASH, 1));
+    if (pnl > maxWin) maxWin = pnl;
+    if (pnl < maxLoss) maxLoss = pnl;
+    if (pnl > 0) wins += 1;
+  }
+
+  const cash = STARTING_CASH + totalPnl;
+  const returnPct = (totalPnl / STARTING_CASH) * 100;
+  let sharpe = 0;
+  if (returnsList.length > 1) {
+    const meanR = returnsList.reduce((a, b) => a + b, 0) / returnsList.length;
+    const varR =
+      returnsList.reduce((a, r) => a + (r - meanR) ** 2, 0) / returnsList.length;
+    const stdR = Math.sqrt(varR);
+    sharpe = stdR > 0 ? meanR / stdR : 0;
+  }
+
+  return {
+    cash: Math.round(cash * 100) / 100,
+    account_value: Math.round(cash * 100) / 100,
+    pnl: Math.round(totalPnl * 100) / 100,
+    return_pct: Math.round(returnPct * 100) / 100,
+    sharpe: Math.round(sharpe * 100) / 100,
+    max_win: Math.round(maxWin * 100) / 100,
+    max_loss: Math.round(maxLoss * 100) / 100,
+    trades,
+    win_rate: trades.length > 0 ? Math.round((wins / trades.length) * 10000) / 100 : 0,
+    total_trades: trades.length,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Activity
 // ---------------------------------------------------------------------------
 

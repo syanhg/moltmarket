@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
+import { hasAuth } from "@/lib/supabase-browser";
 
 const SECTIONS = [
   { id: "overview", label: "Overview" },
@@ -23,6 +24,27 @@ export default function Header() {
   const pathname = usePathname();
   const isHome = pathname === "/";
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [user, setUser] = useState<{ display_name: string } | null>(null);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+
+  useEffect(() => {
+    if (!hasAuth()) return;
+    fetch("/api/auth/me", { credentials: "include" })
+      .then((r) => r.json())
+      .then((data) => data.user && setUser(data.user))
+      .catch(() => {});
+  }, []);
+
+  async function signOut() {
+    try {
+      const { createClient } = await import("@/lib/supabase-browser");
+      await createClient().auth.signOut();
+      setUser(null);
+      window.location.href = "/";
+    } catch {
+      window.location.href = "/";
+    }
+  }
 
   function scrollTo(id: string) {
     setMobileOpen(false);
@@ -68,6 +90,37 @@ export default function Header() {
 
           {/* Right actions */}
           <div className="flex items-center gap-3">
+            {hasAuth() && (
+              user ? (
+                <div className="relative hidden sm:block">
+                  <button
+                    type="button"
+                    onClick={() => setUserMenuOpen(!userMenuOpen)}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-100 rounded"
+                  >
+                    <span className="max-w-[100px] truncate">{user.display_name}</span>
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M7 10l5 5 5-5z"/></svg>
+                  </button>
+                  {userMenuOpen && (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={() => setUserMenuOpen(false)} />
+                      <div className="absolute right-0 top-full mt-1 py-1 w-44 bg-white border border-gray-200 rounded shadow-lg z-50">
+                        <Link href="/account" className="block px-3 py-2 text-xs text-gray-700 hover:bg-gray-50" onClick={() => setUserMenuOpen(false)}>Your account</Link>
+                        <Link href="/trade" className="block px-3 py-2 text-xs text-gray-700 hover:bg-gray-50" onClick={() => setUserMenuOpen(false)}>Trade Markets</Link>
+                        <button type="button" onClick={() => { setUserMenuOpen(false); signOut(); }} className="block w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-gray-50">Sign out</button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              ) : (
+                <Link
+                  href="/login"
+                  className="hidden sm:inline-flex items-center px-3.5 py-1.5 text-xs font-semibold text-gray-700 border border-gray-200 hover:bg-gray-50 transition-colors"
+                >
+                  Sign in
+                </Link>
+              )
+            )}
             <Link
               href="/connect"
               className="hidden sm:inline-flex items-center gap-1.5 bg-[#1565c0] px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-[#0d47a1] transition-colors"
@@ -173,6 +226,17 @@ export default function Header() {
               </Link>
             ))}
             <div className="border-t border-gray-100 my-1" />
+            {hasAuth() && (
+              user ? (
+                <>
+                  <Link href="/account" onClick={() => setMobileOpen(false)} className="px-3 py-2 text-sm font-medium text-gray-600 hover:bg-blue-50/50">Your account</Link>
+                  <Link href="/trade" onClick={() => setMobileOpen(false)} className="px-3 py-2 text-sm font-medium text-gray-600 hover:bg-blue-50/50">Trade Markets</Link>
+                  <button type="button" onClick={() => { setMobileOpen(false); signOut(); }} className="w-full text-left px-3 py-2 text-sm font-medium text-gray-600 hover:bg-blue-50/50">Sign out</button>
+                </>
+              ) : (
+                <Link href="/login" onClick={() => setMobileOpen(false)} className="px-3 py-2 text-sm font-semibold text-[#1565c0] hover:bg-blue-50/50">Sign in</Link>
+              )
+            )}
             <Link
               href="/connect"
               onClick={() => setMobileOpen(false)}

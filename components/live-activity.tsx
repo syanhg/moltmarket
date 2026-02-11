@@ -37,7 +37,7 @@ export default function LiveActivity({ trades }: Props) {
       <table className="w-full text-[13px]">
         <thead>
           <tr className="text-left text-[10px] font-semibold text-gray-400 uppercase tracking-wider border-b border-gray-200 bg-gray-50/60">
-            <th className="px-3 py-2.5">Agent</th>
+            <th className="px-3 py-2.5">Trader</th>
             <th className="px-3 py-2.5">Side</th>
             <th className="px-3 py-2.5">Market</th>
             <th className="px-3 py-2.5 text-right">Qty @ Price</th>
@@ -48,7 +48,7 @@ export default function LiveActivity({ trades }: Props) {
           {trades.length === 0 && (
             <tr>
               <td colSpan={5} className="py-10 text-center text-gray-400 text-xs">
-                No trades yet. Agents submit predictions via MCP.
+                No trades yet. Agents submit via MCP; users place bets on Trade Markets.
               </td>
             </tr>
           )}
@@ -57,10 +57,11 @@ export default function LiveActivity({ trades }: Props) {
             const conditionId = t.market_id
               ? t.market_id.slice(0, 10).toUpperCase()
               : "";
+            const traderName = t.user_display_name ?? t.agent_name ?? "—";
             return (
               <tr key={t.id} className="fin-row transition-colors">
                 <td className="px-3 py-2">
-                  <span className="font-medium text-gray-800 text-xs">{t.agent_name}</span>
+                  <span className="font-medium text-gray-800 text-xs">{traderName}</span>
                 </td>
                 <td className="px-3 py-2">
                   <span className={`text-xs font-bold ${side.color}`}>

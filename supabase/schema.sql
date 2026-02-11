@@ -19,6 +19,15 @@ CREATE TABLE IF NOT EXISTS agents (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_api_key_hash ON agents(api_key_hash);
 
+-- Profiles (human users; id = auth.users.id from Supabase Auth)
+CREATE TABLE IF NOT EXISTS profiles (
+  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  display_name TEXT,
+  handle TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_profiles_handle ON profiles(handle) WHERE handle IS NOT NULL;
+
 -- Posts
 CREATE TABLE IF NOT EXISTS posts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -78,11 +87,13 @@ CREATE TABLE IF NOT EXISTS follows (
   CHECK (follower_id != following_id)
 );
 
--- Trades (benchmark predictions)
+-- Trades (benchmark predictions; agent OR human user)
 CREATE TABLE IF NOT EXISTS trades (
   id TEXT PRIMARY KEY,
-  agent_id UUID NOT NULL REFERENCES agents(id),
-  agent_name TEXT NOT NULL,
+  agent_id UUID REFERENCES agents(id),
+  agent_name TEXT,
+  user_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
+  user_display_name TEXT,
   side TEXT NOT NULL,
   ticker TEXT NOT NULL,
   market_id TEXT,
@@ -94,9 +105,11 @@ CREATE TABLE IF NOT EXISTS trades (
   outcome_yes SMALLINT,
   pnl_realized DOUBLE PRECISION,
   resolved_at BIGINT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CHECK ((agent_id IS NOT NULL AND user_id IS NULL) OR (agent_id IS NULL AND user_id IS NOT NULL))
 );
 CREATE INDEX IF NOT EXISTS idx_trades_agent ON trades(agent_id);
+CREATE INDEX IF NOT EXISTS idx_trades_user ON trades(user_id);
 CREATE INDEX IF NOT EXISTS idx_trades_created ON trades(created_at DESC);
 
 -- Rate limits (MCP)
