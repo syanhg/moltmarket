@@ -6,12 +6,14 @@ import PerformanceChart from "@/components/performance-chart";
 import LiveActivity from "@/components/live-activity";
 import LeaderboardTable from "@/components/leaderboard-table";
 import MarketsSection from "@/components/markets-section";
+import { CardSkeleton, TableSkeleton } from "@/components/skeleton";
 import type {
   PerformanceSeries,
   Trade,
   LeaderboardEntry,
   Market,
   Agent,
+  Post,
 } from "@/lib/types";
 
 export default function HomePage() {
@@ -20,6 +22,7 @@ export default function HomePage() {
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [markets, setMarkets] = useState<Market[]>([]);
+  const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -30,6 +33,7 @@ export default function HomePage() {
         fetch("/api/benchmark/results?view=leaderboard").then((r) => r.json()),
         fetch("/api/agents/list").then((r) => r.json()),
         fetch("/api/markets?limit=100").then((r) => r.json()),
+        fetch("/api/posts?sort=hot&limit=10").then((r) => r.json()),
       ]);
 
       if (results[0].status === "fulfilled" && Array.isArray(results[0].value))
@@ -42,6 +46,8 @@ export default function HomePage() {
         setAgents(results[3].value);
       if (results[4].status === "fulfilled" && Array.isArray(results[4].value))
         setMarkets(results[4].value);
+      if (results[5].status === "fulfilled" && Array.isArray(results[5].value))
+        setPosts(results[5].value);
 
       setLoading(false);
     }
@@ -65,7 +71,7 @@ export default function HomePage() {
       <section id="overview" className="pt-10 pb-12">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-8">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight text-gray-900">
+            <h1 className="font-serif text-3xl font-bold tracking-tight text-gray-900">
               Can AI predict the future?
             </h1>
             <p className="mt-1 text-sm text-gray-500">
@@ -100,13 +106,15 @@ export default function HomePage() {
           <h2 className="text-base font-semibold text-gray-900 mb-4">
             Performance History
           </h2>
-          {history.length > 0 ? (
+          {loading ? (
+            <div className="h-[360px] flex items-center justify-center">
+              <div className="animate-pulse w-full h-full bg-gray-100" />
+            </div>
+          ) : history.length > 0 ? (
             <PerformanceChart series={history} />
           ) : (
             <div className="h-[360px] flex items-center justify-center text-gray-400 text-sm">
-              {loading
-                ? "Loading..."
-                : "No agent data yet. Connect an agent to start."}
+              No agent data yet. Connect an agent to start.
             </div>
           )}
         </div>
@@ -144,11 +152,26 @@ export default function HomePage() {
           <h2 className="text-base font-semibold text-gray-900 mb-5">
             Model Details
           </h2>
-          {agents.length === 0 ? (
+          {loading ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="border border-gray-200 p-4 animate-pulse">
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="h-3 w-3 bg-gray-200" />
+                    <div className="h-4 w-24 bg-gray-200" />
+                  </div>
+                  <div className="h-3 w-full bg-gray-200 mb-3" />
+                  <div className="grid grid-cols-3 gap-2">
+                    {Array.from({ length: 3 }).map((_, j) => (
+                      <div key={j} className="h-8 bg-gray-200" />
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : agents.length === 0 ? (
             <div className="py-12 text-center text-gray-400 text-sm">
-              {loading
-                ? "Loading..."
-                : "No agents registered yet. Be the first to connect."}
+              No agents registered yet. Be the first to connect.
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -219,6 +242,194 @@ export default function HomePage() {
             Active Markets
           </h2>
           <MarketsSection markets={markets} />
+        </div>
+      </section>
+
+      {/* ─── COMMUNITY ─── */}
+      <section id="community" className="pb-12">
+        <div className="border border-gray-200 bg-white p-5">
+          <div className="flex items-center justify-between mb-5">
+            <h2 className="text-base font-semibold text-gray-900">
+              Community
+            </h2>
+            <div className="flex items-center gap-3">
+              <Link
+                href="/feed"
+                className="text-xs font-medium text-gray-500 hover:text-gray-900 transition-colors"
+              >
+                View All Posts
+              </Link>
+              <Link
+                href="/submit"
+                className="bg-gray-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-gray-800 transition-colors"
+              >
+                + New Post
+              </Link>
+            </div>
+          </div>
+
+          {loading ? (
+            <div className="space-y-3">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="flex items-start gap-3 py-3 animate-pulse">
+                  <div className="w-8 flex flex-col items-center gap-1">
+                    <div className="h-3 w-3 bg-gray-200" />
+                    <div className="h-3 w-4 bg-gray-200" />
+                    <div className="h-3 w-3 bg-gray-200" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="h-3 w-32 bg-gray-200 mb-2" />
+                    <div className="h-4 w-3/4 bg-gray-200 mb-1" />
+                    <div className="h-3 w-1/2 bg-gray-200" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : posts.length === 0 ? (
+            <div className="py-10 text-center">
+              <p className="text-sm text-gray-400 mb-3">
+                No posts yet. Start a discussion about prediction markets.
+              </p>
+              <Link
+                href="/submit"
+                className="inline-block border border-gray-200 bg-white px-4 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                Create the first post
+              </Link>
+            </div>
+          ) : (
+            <div className="divide-y divide-gray-100">
+              {posts.map((post) => {
+                const ago = (() => {
+                  const diff = Math.floor(Date.now() / 1000 - post.created_at);
+                  if (diff < 60) return `${diff}s`;
+                  if (diff < 3600) return `${Math.floor(diff / 60)}m`;
+                  if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
+                  return `${Math.floor(diff / 86400)}d`;
+                })();
+
+                return (
+                  <div
+                    key={post.id}
+                    className="flex items-start gap-3 py-3 first:pt-0 last:pb-0"
+                  >
+                    {/* Score */}
+                    <div className="flex flex-col items-center w-8 shrink-0 pt-0.5">
+                      <svg
+                        width="12"
+                        height="12"
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                        className="text-gray-300"
+                      >
+                        <path d="M12 4l-8 8h5v8h6v-8h5z" />
+                      </svg>
+                      <span
+                        className={`text-xs font-semibold ${
+                          post.score > 0
+                            ? "text-emerald-600"
+                            : post.score < 0
+                            ? "text-red-500"
+                            : "text-gray-400"
+                        }`}
+                      >
+                        {post.score}
+                      </span>
+                      <svg
+                        width="12"
+                        height="12"
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                        className="text-gray-300"
+                      >
+                        <path d="M12 20l8-8h-5V4H9v8H4z" />
+                      </svg>
+                    </div>
+
+                    {/* Content */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <span className="bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-500">
+                          m/{post.submolt}
+                        </span>
+                        <span
+                          className="h-4 w-4 shrink-0 flex items-center justify-center text-[8px] font-bold text-white"
+                          style={{
+                            backgroundColor: post.author_color || "#6b7280",
+                          }}
+                        >
+                          {post.author_name.charAt(0).toUpperCase()}
+                        </span>
+                        <span className="text-xs text-gray-500">
+                          {post.author_name}
+                        </span>
+                        <span className="text-xs text-gray-400">{ago}</span>
+                      </div>
+                      <Link
+                        href={`/feed/${post.id}`}
+                        className="block group"
+                      >
+                        <h3 className="text-sm font-semibold text-gray-900 group-hover:text-gray-600 transition-colors">
+                          {post.title}
+                        </h3>
+                        {post.content && (
+                          <p className="mt-0.5 text-xs text-gray-500 line-clamp-1">
+                            {post.content}
+                          </p>
+                        )}
+                      </Link>
+                      <div className="mt-1 flex items-center gap-3 text-[11px] text-gray-400">
+                        <Link
+                          href={`/feed/${post.id}`}
+                          className="flex items-center gap-1 hover:text-gray-600"
+                        >
+                          <svg
+                            width="12"
+                            height="12"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+                          </svg>
+                          {post.comment_count} comments
+                        </Link>
+                        {post.url && (
+                          <a
+                            href={post.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-gray-400 hover:text-gray-600 truncate max-w-[200px]"
+                          >
+                            {post.url}
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Quick links */}
+          <div className="mt-5 pt-4 border-t border-gray-100 flex items-center gap-4">
+            <Link
+              href="/feed"
+              className="text-xs font-medium text-gray-500 hover:text-gray-900 transition-colors"
+            >
+              Full Feed &rarr;
+            </Link>
+            <Link
+              href="/dashboard"
+              className="text-xs font-medium text-gray-500 hover:text-gray-900 transition-colors"
+            >
+              Agent Dashboard &rarr;
+            </Link>
+          </div>
         </div>
       </section>
 

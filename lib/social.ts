@@ -1,5 +1,5 @@
 /**
- * Social features: agent registration/auth, posts, comments, voting.
+ * Social features: agent registration/auth, posts, comments, voting, follows.
  *
  * All data stored in Vercel KV via lib/kv.ts.
  */
@@ -32,6 +32,29 @@ const AGENT_COLORS = [
   "#8b5cf6", "#ec4899", "#06b6d4", "#84cc16",
 ];
 
+// Sanitize user input: strip control chars, limit length
+function sanitize(input: string, maxLength = 5000): string {
+  // eslint-disable-next-line no-control-regex
+  return input.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "").slice(0, maxLength);
+}
+
+// Validate URL is http or https
+function isValidUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+// Validate agent name: alphanumeric, hyphens, underscores only
+const AGENT_NAME_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,30}[a-zA-Z0-9]$/;
+
+export function isValidAgentName(name: string): boolean {
+  return AGENT_NAME_REGEX.test(name);
+}
+
 // ---------------------------------------------------------------------------
 // Agent registration & auth
 // ---------------------------------------------------------------------------
@@ -58,6 +81,22 @@ export async function registerAgent(
   description: string,
   mcpUrl: string
 ): Promise<AgentRecord & { api_key: string }> {
+  // Validate name format
+  if (!isValidAgentName(name)) {
+    throw new Error("Name must be 2-32 alphanumeric characters, hyphens, or underscores");
+  }
+
+  // Check if name is taken
+  const existing = await kvGet<string>(`agent_name:${name}`);
+  if (existing) {
+    throw new Error("Agent name is already taken");
+  }
+
+  // Validate MCP URL
+  if (!isValidUrl(mcpUrl)) {
+    throw new Error("mcp_url must be a valid HTTP or HTTPS URL");
+  }
+
   const agentId = randomUUID();
   const apiKey = generateApiKey();
   const color = AGENT_COLORS[simpleHash(name) % AGENT_COLORS.length];
@@ -65,7 +104,7 @@ export async function registerAgent(
   const agent: AgentRecord = {
     id: agentId,
     name,
-    description,
+    description: sanitize(description, 500),
     color,
     mcp_url: mcpUrl,
     api_key_hash: hashApiKey(apiKey),
@@ -127,10 +166,91 @@ export async function updateAgent(
   if (!agent) return null;
   const allowed = new Set(["description", "mcp_url", "display_name"]);
   for (const [k, v] of Object.entries(updates)) {
-    if (allowed.has(k)) (agent as Record<string, unknown>)[k] = v;
+    if (allowed.has(k)) {
+      if (k === "description" && typeof v === "string") {
+        (agent as Record<string, unknown>)[k] = sanitize(v, 500);
+      } else if (k === "mcp_url" && typeof v === "string") {
+        if (!isValidUrl(v)) continue; // skip invalid URLs
+        (agent as Record<string, unknown>)[k] = v;
+      } else {
+        (agent as Record<string, unknown>)[k] = v;
+      }
+    }
   }
   await kvSet(`agent:${agentId}`, agent);
   return agent;
+}
+
+// ---------------------------------------------------------------------------
+// Follow / Unfollow
+// ---------------------------------------------------------------------------
+
+export async function followAgent(
+  followerId: string,
+  targetId: string
+): Promise<{ success: boolean; follower_count: number }> {
+  if (followerId === targetId) {
+    throw new Error("Cannot follow yourself");
+  }
+
+  const followKey = `follow:${followerId}:${targetId}`;
+  const already = await kvGet<boolean>(followKey);
+  if (already) {
+    throw new Error("Already following this agent");
+  }
+
+  const target = await getAgentById(targetId);
+  if (!target) throw new Error("Agent not found");
+  const follower = await getAgentById(followerId);
+  if (!follower) throw new Error("Follower agent not found");
+
+  // Mark follow
+  await kvSet(followKey, true);
+  await kvLpush(`followers:${targetId}`, followerId);
+  await kvLpush(`following:${followerId}`, targetId);
+
+  // Update counts
+  target.follower_count = (target.follower_count || 0) + 1;
+  follower.following_count = (follower.following_count || 0) + 1;
+  await kvSet(`agent:${targetId}`, target);
+  await kvSet(`agent:${followerId}`, follower);
+
+  return { success: true, follower_count: target.follower_count };
+}
+
+export async function unfollowAgent(
+  followerId: string,
+  targetId: string
+): Promise<{ success: boolean; follower_count: number }> {
+  const followKey = `follow:${followerId}:${targetId}`;
+  const isFollowing = await kvGet<boolean>(followKey);
+  if (!isFollowing) {
+    throw new Error("Not following this agent");
+  }
+
+  const target = await getAgentById(targetId);
+  if (!target) throw new Error("Agent not found");
+  const follower = await getAgentById(followerId);
+  if (!follower) throw new Error("Follower agent not found");
+
+  // Remove follow
+  await kvDel(followKey);
+
+  // Update counts (floor at 0)
+  target.follower_count = Math.max((target.follower_count || 0) - 1, 0);
+  follower.following_count = Math.max((follower.following_count || 0) - 1, 0);
+  await kvSet(`agent:${targetId}`, target);
+  await kvSet(`agent:${followerId}`, follower);
+
+  return { success: true, follower_count: target.follower_count };
+}
+
+export async function isFollowing(
+  followerId: string,
+  targetId: string
+): Promise<boolean> {
+  const val = await kvGet<boolean>(`follow:${followerId}:${targetId}`);
+  return !!val;
 }
 
 // ---------------------------------------------------------------------------
@@ -155,6 +275,10 @@ export interface PostRecord {
   [key: string]: unknown;
 }
 
+const VALID_SUBMOLTS = new Set([
+  "predictionmarkets", "general", "ai", "crypto", "politics",
+]);
+
 export async function createPost(
   authorId: string,
   title: string,
@@ -167,16 +291,32 @@ export async function createPost(
   const author = await getAgentById(authorId);
   const now = Date.now() / 1000;
 
+  // Validate
+  const cleanTitle = sanitize(title, 300);
+  const cleanContent = sanitize(content, 10000);
+  if (!cleanTitle) throw new Error("Title is required");
+
+  const cleanSubmolt = VALID_SUBMOLTS.has(submolt) ? submolt : "general";
+
+  // Validate URL if provided
+  let cleanUrl: string | null = null;
+  if (url && typeof url === "string") {
+    if (isValidUrl(url)) {
+      cleanUrl = url.slice(0, 2000);
+    }
+    // silently discard invalid URLs
+  }
+
   const post: PostRecord = {
     id: postId,
     author_id: authorId,
     author_name: author?.name ?? "unknown",
     author_color: author?.color ?? "#6b7280",
-    submolt,
-    title,
-    content,
-    url,
-    post_type: postType,
+    submolt: cleanSubmolt,
+    title: cleanTitle,
+    content: cleanContent,
+    url: cleanUrl,
+    post_type: postType === "link" ? "link" : "text",
     score: 0,
     upvotes: 0,
     downvotes: 0,
@@ -186,7 +326,7 @@ export async function createPost(
 
   await kvSet(`post:${postId}`, post);
   await kvLpush("posts:all", postId);
-  await kvLpush(`posts:submolt:${submolt}`, postId);
+  await kvLpush(`posts:submolt:${cleanSubmolt}`, postId);
   await kvLpush(`posts:author:${authorId}`, postId);
 
   if (author) {
@@ -273,6 +413,9 @@ export async function createComment(
   const commentId = randomUUID();
   const author = await getAgentById(authorId);
 
+  const cleanContent = sanitize(content, 5000);
+  if (!cleanContent) throw new Error("Comment content is required");
+
   let parentDepth = 0;
   if (parentId) {
     const parent = await kvGet<CommentRecord>(`comment:${parentId}`);
@@ -286,7 +429,7 @@ export async function createComment(
     author_name: author?.name ?? "unknown",
     author_color: author?.color ?? "#6b7280",
     parent_id: parentId,
-    content,
+    content: cleanContent,
     score: 0,
     upvotes: 0,
     downvotes: 0,
@@ -345,7 +488,7 @@ export async function listComments(
 }
 
 // ---------------------------------------------------------------------------
-// Voting
+// Voting (with optimistic locking pattern)
 // ---------------------------------------------------------------------------
 
 export async function voteOn(
@@ -357,42 +500,65 @@ export async function voteOn(
   const voteKey = `vote:${agentId}:${targetType}:${targetId}`;
   const prefix = targetType === "post" ? "post" : "comment";
 
+  // Re-read target fresh each time to minimize stale data
   const target = await kvGet<Record<string, unknown>>(`${prefix}:${targetId}`);
   if (!target) return null;
 
   const prevVote = (await kvGet<number>(voteKey)) || 0;
 
-  // Remove previous vote
+  // Calculate new upvotes/downvotes from scratch based on current state
+  let upvotes = Math.max((target.upvotes as number) || 0, 0);
+  let downvotes = Math.max((target.downvotes as number) || 0, 0);
+
+  // Remove previous vote effect
   if (prevVote === 1) {
-    target.upvotes = Math.max(((target.upvotes as number) || 0) - 1, 0);
+    upvotes = Math.max(upvotes - 1, 0);
   } else if (prevVote === -1) {
-    target.downvotes = Math.max(((target.downvotes as number) || 0) - 1, 0);
+    downvotes = Math.max(downvotes - 1, 0);
   }
 
   // Apply new vote (toggle off if same)
   let newVote = 0;
   if (prevVote === value) {
+    // Toggle off
     await kvDel(voteKey);
   } else {
+    // Apply
     if (value === 1) {
-      target.upvotes = ((target.upvotes as number) || 0) + 1;
+      upvotes += 1;
     } else if (value === -1) {
-      target.downvotes = ((target.downvotes as number) || 0) + 1;
+      downvotes += 1;
     }
     await kvSet(voteKey, value);
     newVote = value;
   }
 
-  target.score = ((target.upvotes as number) || 0) - ((target.downvotes as number) || 0);
+  // Update target
+  target.upvotes = upvotes;
+  target.downvotes = downvotes;
+  target.score = upvotes - downvotes;
   await kvSet(`${prefix}:${targetId}`, target);
 
   // Update author karma
-  const author = await getAgentById((target.author_id as string) || "");
-  if (author) {
-    const karmaDelta = newVote - (prevVote || 0);
-    author.karma = (author.karma || 0) + karmaDelta;
-    await kvSet(`agent:${author.id}`, author);
+  const authorId = target.author_id as string;
+  if (authorId) {
+    const author = await getAgentById(authorId);
+    if (author) {
+      const karmaDelta = newVote - (prevVote || 0);
+      author.karma = Math.max((author.karma || 0) + karmaDelta, 0);
+      await kvSet(`agent:${author.id}`, author);
+    }
   }
 
-  return target;
+  return { ...target, user_vote: newVote };
+}
+
+// Get vote state for a user on a target
+export async function getUserVote(
+  targetType: "post" | "comment",
+  targetId: string,
+  agentId: string
+): Promise<number> {
+  const voteKey = `vote:${agentId}:${targetType}:${targetId}`;
+  return (await kvGet<number>(voteKey)) || 0;
 }

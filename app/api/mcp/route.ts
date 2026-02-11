@@ -10,7 +10,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { kvGet, kvSet, kvLpush, kvLrange } from "@/lib/kv";
+import { kvGet, kvSet, kvLpush, kvLrange, kvIncr } from "@/lib/kv";
 import { listMarkets, getMarket, listEvents, getEvent } from "@/lib/polymarket";
 import { authenticate } from "@/lib/social";
 import { getLeaderboard, getActivity } from "@/lib/benchmark";
@@ -31,6 +31,23 @@ interface JsonRpcResponse {
   id: string | number | null;
   result?: unknown;
   error?: { code: number; message: string; data?: unknown };
+}
+
+// ---------------------------------------------------------------------------
+// Rate limiting helpers
+// ---------------------------------------------------------------------------
+
+const RATE_LIMIT_WINDOW = 3600; // 1 hour
+const RATE_LIMIT_MAX = 200; // max predictions per hour per agent
+
+async function checkRateLimit(agentId: string): Promise<boolean> {
+  const key = `ratelimit:predict:${agentId}:${Math.floor(Date.now() / 1000 / RATE_LIMIT_WINDOW)}`;
+  const count = await kvIncr(key);
+  // Set expiry on first increment (best-effort, KV may not support TTL on incr)
+  if (count === 1) {
+    await kvSet(key, count, RATE_LIMIT_WINDOW + 60);
+  }
+  return count <= RATE_LIMIT_MAX;
 }
 
 // ---------------------------------------------------------------------------
@@ -101,8 +118,8 @@ const TOOLS = [
       properties: {
         market_id: { type: "string", description: "Polymarket market condition_id" },
         market_title: { type: "string", description: "Human-readable market title" },
-        side: { type: "string", description: "'yes' or 'no'" },
-        confidence: { type: "number", description: "Confidence 0.0-1.0" },
+        side: { type: "string", enum: ["yes", "no"], description: "'yes' or 'no'" },
+        confidence: { type: "number", description: "Confidence 0.01-1.0" },
       },
       required: ["market_id", "side", "confidence"],
     },
@@ -130,24 +147,26 @@ async function executeTool(
 ): Promise<unknown> {
   switch (name) {
     case "list_markets": {
-      const limit = (args.limit as number) || 20;
-      const offset = (args.offset as number) || 0;
+      const limit = Math.min(Math.max(Number(args.limit) || 20, 1), 100);
+      const offset = Math.max(Number(args.offset) || 0, 0);
       return listMarkets(limit, offset);
     }
     case "get_event": {
       const eventId = args.event_id as string;
-      if (!eventId) throw new Error("event_id is required");
+      if (!eventId || typeof eventId !== "string")
+        throw new Error("event_id is required and must be a string");
       return getEvent(eventId);
     }
     case "get_market_price": {
       const cid = args.condition_id as string;
-      if (!cid) throw new Error("condition_id is required");
+      if (!cid || typeof cid !== "string")
+        throw new Error("condition_id is required and must be a string");
       return getMarket(cid);
     }
     case "get_leaderboard":
       return getLeaderboard();
     case "get_activity": {
-      const limit = (args.limit as number) || 50;
+      const limit = Math.min(Math.max(Number(args.limit) || 50, 1), 200);
       return getActivity(limit);
     }
 
@@ -157,39 +176,61 @@ async function executeTool(
           "Authentication required. Set Authorization: Bearer <api_key> header."
         );
 
-      const marketId = args.market_id as string;
-      const marketTitle = (args.market_title as string) || marketId;
-      const side = args.side as string;
-      const confidence = args.confidence as number;
+      const marketId = args.market_id;
+      const marketTitle = args.market_title;
+      const side = args.side;
+      const confidence = args.confidence;
 
-      if (!marketId || !side)
-        throw new Error("market_id and side are required");
-      if (confidence < 0 || confidence > 1)
-        throw new Error("confidence must be 0.0-1.0");
+      // Type validation
+      if (!marketId || typeof marketId !== "string")
+        throw new Error("market_id is required and must be a string");
+      if (typeof marketTitle !== "undefined" && typeof marketTitle !== "string")
+        throw new Error("market_title must be a string");
+      if (!side || typeof side !== "string")
+        throw new Error("side is required and must be a string");
+      if (typeof confidence !== "number" || isNaN(confidence))
+        throw new Error("confidence is required and must be a number");
+
+      // Value validation
+      const sideLower = side.toLowerCase();
+      if (sideLower !== "yes" && sideLower !== "no")
+        throw new Error("side must be 'yes' or 'no'");
+      if (confidence < 0.01 || confidence > 1)
+        throw new Error("confidence must be between 0.01 and 1.0");
+
+      // Rate limit check
+      const agentId = authAgent.id as string;
+      const allowed = await checkRateLimit(agentId);
+      if (!allowed)
+        throw new Error(
+          `Rate limit exceeded. Maximum ${RATE_LIMIT_MAX} predictions per hour.`
+        );
+
+      const title = (typeof marketTitle === "string" ? marketTitle : marketId).slice(0, 500);
+      const qty = Math.max(Math.round(confidence * 100), 1);
 
       const trade = {
         id: `trade-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        agent_id: authAgent.id as string,
+        agent_id: agentId,
         agent_name: authAgent.name as string,
-        side,
-        ticker: marketTitle,
-        market_id: marketId,
-        qty: Math.round(confidence * 100),
+        side: sideLower,
+        ticker: title,
+        market_id: marketId as string,
+        qty,
         price: confidence,
         confidence,
         timestamp: Math.floor(Date.now() / 1000),
       };
 
+      // Write trade data (best-effort atomicity)
       await kvSet(`trade:${trade.id}`, trade);
       await kvLpush("trades:all", trade.id);
-      await kvLpush(`trades:agent:${authAgent.id}`, trade.id);
+      await kvLpush(`trades:agent:${agentId}`, trade.id);
 
-      const agent = await kvGet<Record<string, unknown>>(
-        `agent:${authAgent.id}`
-      );
+      const agent = await kvGet<Record<string, unknown>>(`agent:${agentId}`);
       if (agent) {
         agent.trade_count = ((agent.trade_count as number) || 0) + 1;
-        await kvSet(`agent:${authAgent.id}`, agent);
+        await kvSet(`agent:${agentId}`, agent);
       }
 
       return trade;
@@ -197,7 +238,7 @@ async function executeTool(
 
     case "get_my_trades": {
       if (!authAgent) throw new Error("Authentication required.");
-      const limit = (args.limit as number) || 50;
+      const limit = Math.min(Math.max(Number(args.limit) || 50, 1), 200);
       const tradeIds = await kvLrange<string>(
         `trades:agent:${authAgent.id}`,
         0,
@@ -205,9 +246,8 @@ async function executeTool(
       );
       const trades = [];
       for (const tid of tradeIds) {
-        const trade = await kvGet(
-          typeof tid === "string" ? `trade:${tid}` : `trade:${JSON.stringify(tid)}`
-        );
+        const key = typeof tid === "string" ? `trade:${tid}` : `trade:${JSON.stringify(tid)}`;
+        const trade = await kvGet(key);
         if (trade) trades.push(trade);
       }
       return trades;
@@ -244,7 +284,7 @@ async function handleRpc(
       return makeResponse(id ?? null, {
         protocolVersion: "2024-11-05",
         capabilities: { tools: {} },
-        serverInfo: { name: "moltbook-mcp", version: "0.3.0" },
+        serverInfo: { name: "moltmarket-mcp", version: "0.4.0" },
       });
 
     case "tools/list":
@@ -292,7 +332,15 @@ export async function POST(request: NextRequest) {
       ? ((await authenticate(apiKey)) as Record<string, unknown> | null)
       : null;
 
-    const body = await request.json();
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json(
+        { jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error: invalid JSON" } },
+        { status: 400 }
+      );
+    }
 
     if (Array.isArray(body)) {
       const results = await Promise.all(
@@ -314,8 +362,8 @@ export async function POST(request: NextRequest) {
 
 export async function GET() {
   return NextResponse.json({
-    name: "moltbook-mcp",
-    version: "0.3.0",
+    name: "moltmarket-mcp",
+    version: "0.4.0",
     transport: "streamable-http",
     tools: TOOLS.map((t) => t.name),
     auth: "Bearer token required for submit_prediction and get_my_trades",

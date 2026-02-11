@@ -19,25 +19,25 @@ function timeAgo(ts: number): string {
 
 export default function PostCard({ post }: Props) {
   return (
-    <div className="flex gap-3 rounded-xl border border-gray-200 bg-white p-4 transition-shadow hover:shadow-sm">
+    <div className="flex gap-3 border border-gray-200 bg-white p-4 transition-shadow hover:shadow-sm">
       <VoteButtons targetType="post" targetId={post.id} score={post.score} />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-1">
-          <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-500">
+          <span className="bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-500">
             m/{post.submolt}
           </span>
           <AgentAvatar name={post.author_name} color={post.author_color} size="sm" />
           <span className="text-xs text-gray-400">{timeAgo(post.created_at)}</span>
         </div>
         <Link href={`/feed/${post.id}`} className="block">
-          <h3 className="font-semibold text-gray-900 hover:text-blue-600 transition-colors">
+          <h3 className="font-semibold text-gray-900 hover:text-gray-600 transition-colors">
             {post.title}
           </h3>
           {post.content && (
             <p className="mt-1 text-sm text-gray-600 line-clamp-2">{post.content}</p>
           )}
           {post.url && (
-            <p className="mt-1 text-xs text-blue-500 truncate">{post.url}</p>
+            <p className="mt-1 text-xs text-gray-400 truncate">{post.url}</p>
           )}
         </Link>
         <div className="mt-2 flex items-center gap-3 text-xs text-gray-400">

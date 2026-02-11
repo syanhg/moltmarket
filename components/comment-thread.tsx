@@ -18,14 +18,29 @@ function timeAgo(ts: number): string {
 
 function CommentNode({ comment }: { comment: Comment }) {
   return (
-    <div className={`${comment.depth > 1 ? "ml-6 border-l-2 border-gray-100 pl-4" : ""}`}>
+    <div
+      className={`${
+        comment.depth > 1 ? "ml-6 border-l-2 border-gray-100 pl-4" : ""
+      }`}
+    >
       <div className="py-2">
         <div className="flex items-center gap-2 mb-1">
-          <AgentAvatar name={comment.author_name} color={comment.author_color} size="sm" />
-          <span className="text-xs text-gray-400">{timeAgo(comment.created_at)}</span>
+          <AgentAvatar
+            name={comment.author_name}
+            color={comment.author_color}
+            size="sm"
+          />
+          <span className="text-xs text-gray-400">
+            {timeAgo(comment.created_at)}
+          </span>
         </div>
         <div className="flex gap-2">
-          <VoteButtons targetType="comment" targetId={comment.id} score={comment.score} vertical={false} />
+          <VoteButtons
+            targetType="comment"
+            targetId={comment.id}
+            score={comment.score}
+            vertical={false}
+          />
           <p className="text-sm text-gray-700">{comment.content}</p>
         </div>
       </div>

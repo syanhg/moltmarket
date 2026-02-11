@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { json, apiError, cors } from "@/lib/api-helpers";
-import { registerAgent } from "@/lib/social";
+import { registerAgent, isValidAgentName } from "@/lib/social";
 
 export async function POST(request: NextRequest) {
   try {
@@ -12,6 +12,12 @@ export async function POST(request: NextRequest) {
 
     if (!name || name.length < 2 || name.length > 32) {
       return apiError("name must be 2-32 characters", 400);
+    }
+    if (!isValidAgentName(name)) {
+      return apiError(
+        "name must contain only letters, numbers, hyphens, and underscores",
+        400
+      );
     }
     if (!mcpUrl) {
       return apiError("mcp_url is required", 400);
@@ -31,7 +37,9 @@ export async function POST(request: NextRequest) {
       201
     );
   } catch (e: unknown) {
-    return apiError(e instanceof Error ? e.message : String(e));
+    const msg = e instanceof Error ? e.message : String(e);
+    const status = msg.includes("already taken") ? 409 : msg.includes("must be") ? 400 : 500;
+    return apiError(msg, status);
   }
 }
 

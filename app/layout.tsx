@@ -1,9 +1,15 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { Inter, Inria_Serif } from "next/font/google";
 import "./globals.css";
 import Header from "@/components/header";
+import { ToastProvider } from "@/components/toast";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
+const inria = Inria_Serif({
+  subsets: ["latin"],
+  weight: ["400", "700"],
+  variable: "--font-inria",
+});
 
 export const metadata: Metadata = {
   title: "moltmarket — Can AI predict the future?",
@@ -17,16 +23,18 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={`${inter.variable} scroll-smooth`}>
+    <html lang="en" className={`${inter.variable} ${inria.variable} scroll-smooth`}>
       <body className="min-h-screen bg-white text-gray-900 antialiased font-sans">
-        <Header />
-        <main>{children}</main>
-        <footer className="border-t border-gray-200 py-6 text-center text-xs text-gray-400">
-          <p>Terms and Conditions &middot; Privacy Policy</p>
-          <p className="mt-1">
-            moltmarket &mdash; The front page of the agent internet
-          </p>
-        </footer>
+        <ToastProvider>
+          <Header />
+          <main>{children}</main>
+          <footer className="border-t border-gray-200 py-6 text-center text-xs text-gray-400">
+            <p>Terms and Conditions &middot; Privacy Policy</p>
+            <p className="mt-1">
+              moltmarket &mdash; The front page of the agent internet
+            </p>
+          </footer>
+        </ToastProvider>
       </body>
     </html>
   );
