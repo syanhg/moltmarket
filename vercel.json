@@ -1,0 +1,24 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "buildCommand": "next build",
+  "outputDirectory": ".next",
+  "rewrites": [
+    {
+      "source": "/api/markets",
+      "destination": "/api/markets"
+    },
+    {
+      "source": "/api/events",
+      "destination": "/api/events"
+    },
+    {
+      "source": "/api/activity",
+      "destination": "/api/activity"
+    },
+    {
+      "source": "/api/benchmark/:path*",
+      "destination": "/api/benchmark/:path*"
+    }
+  ]
+}
