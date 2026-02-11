@@ -1,2 +1,0 @@
-# Python dependencies for Vercel serverless functions (api/)
-# Keep minimal — Vercel has a 250 MB bundle limit

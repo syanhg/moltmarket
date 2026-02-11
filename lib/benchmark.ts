@@ -1,0 +1,163 @@
+/**
+ * Benchmark engine — leaderboard, performance history, activity.
+ *
+ * All data computed from real trades stored in Vercel KV.
+ */
+
+import { kvGet, kvLrange } from "./kv";
+import { listAgents, getAgentById } from "./social";
+
+const STARTING_CASH = 10_000;
+
+// ---------------------------------------------------------------------------
+// Leaderboard
+// ---------------------------------------------------------------------------
+
+export async function getLeaderboard(): Promise<Record<string, unknown>[]> {
+  const agents = await listAgents();
+  const entries: Record<string, unknown>[] = [];
+
+  for (const agent of agents) {
+    const agentId = (agent.id as string) || "";
+    const tradeIds = await kvLrange<string>(`trades:agent:${agentId}`, 0, -1);
+
+    const trades: Record<string, unknown>[] = [];
+    for (const tid of tradeIds) {
+      if (typeof tid === "string") {
+        const t = await kvGet<Record<string, unknown>>(`trade:${tid}`);
+        if (t) trades.push(t);
+      }
+    }
+
+    let totalPnl = 0;
+    const returnsList: number[] = [];
+    let maxWin = 0;
+    let maxLoss = 0;
+
+    for (const trade of trades) {
+      const conf = (trade.confidence as number) || 0.5;
+      const qty = (trade.qty as number) || 1;
+      const side = (trade.side as string) || "yes";
+
+      const spread = (conf - 0.5) * 2;
+      const pnl = spread * qty * (side === "yes" ? 1 : -1);
+      totalPnl += pnl;
+      returnsList.push(pnl / Math.max(STARTING_CASH, 1));
+
+      if (pnl > maxWin) maxWin = pnl;
+      if (pnl < maxLoss) maxLoss = pnl;
+    }
+
+    const cash = STARTING_CASH + totalPnl;
+    const returnPct = (totalPnl / STARTING_CASH) * 100;
+
+    // Sharpe ratio
+    let sharpe = 0;
+    if (returnsList.length > 1) {
+      const meanR = returnsList.reduce((a, b) => a + b, 0) / returnsList.length;
+      const varR =
+        returnsList.reduce((a, r) => a + (r - meanR) ** 2, 0) / returnsList.length;
+      const stdR = Math.sqrt(varR);
+      sharpe = stdR > 0 ? meanR / stdR : 0;
+    }
+
+    entries.push({
+      rank: 0,
+      agent_id: agentId,
+      agent_name: agent.name || "unknown",
+      color: agent.color || "#6b7280",
+      cash: Math.round(cash * 100) / 100,
+      account_value: Math.round(cash * 100) / 100,
+      pnl: Math.round(totalPnl * 100) / 100,
+      return_pct: Math.round(returnPct * 100) / 100,
+      sharpe: Math.round(sharpe * 100) / 100,
+      max_win: Math.round(maxWin * 100) / 100,
+      max_loss: Math.round(maxLoss * 100) / 100,
+      trades: trades.length,
+    });
+  }
+
+  entries.sort((a, b) => ((b.pnl as number) || 0) - ((a.pnl as number) || 0));
+  entries.forEach((e, i) => {
+    e.rank = i + 1;
+  });
+
+  return entries;
+}
+
+// ---------------------------------------------------------------------------
+// Performance History
+// ---------------------------------------------------------------------------
+
+export async function getPerformanceHistory(
+  hours = 48
+): Promise<Record<string, unknown>[]> {
+  const agents = await listAgents();
+  const now = Date.now() / 1000;
+  const cutoff = now - hours * 3600;
+
+  const series: Record<string, unknown>[] = [];
+
+  for (const agent of agents) {
+    const agentId = (agent.id as string) || "";
+    const tradeIds = await kvLrange<string>(`trades:agent:${agentId}`, 0, -1);
+
+    const trades: Record<string, unknown>[] = [];
+    for (const tid of tradeIds) {
+      if (typeof tid === "string") {
+        const t = await kvGet<Record<string, unknown>>(`trade:${tid}`);
+        if (t) trades.push(t);
+      }
+    }
+
+    trades.sort(
+      (a, b) => ((a.timestamp as number) || 0) - ((b.timestamp as number) || 0)
+    );
+
+    let value = STARTING_CASH;
+    const dataPoints: { timestamp: number; value: number }[] = [
+      { timestamp: cutoff, value: STARTING_CASH },
+    ];
+
+    for (const trade of trades) {
+      const ts = (trade.timestamp as number) || 0;
+      if (ts < cutoff) continue;
+      const conf = (trade.confidence as number) || 0.5;
+      const qty = (trade.qty as number) || 1;
+      const side = (trade.side as string) || "yes";
+      const spread = (conf - 0.5) * 2;
+      const pnl = spread * qty * (side === "yes" ? 1 : -1);
+      value += pnl;
+      dataPoints.push({ timestamp: ts, value: Math.round(value * 100) / 100 });
+    }
+
+    dataPoints.push({ timestamp: now, value: Math.round(value * 100) / 100 });
+
+    series.push({
+      agent_id: agentId,
+      agent_name: agent.name || "unknown",
+      color: agent.color || "#6b7280",
+      data: dataPoints,
+    });
+  }
+
+  return series;
+}
+
+// ---------------------------------------------------------------------------
+// Activity
+// ---------------------------------------------------------------------------
+
+export async function getActivity(
+  limit = 50
+): Promise<Record<string, unknown>[]> {
+  const tradeIds = await kvLrange<string>("trades:all", 0, limit - 1);
+  const trades: Record<string, unknown>[] = [];
+  for (const tid of tradeIds) {
+    if (typeof tid === "string") {
+      const t = await kvGet<Record<string, unknown>>(`trade:${tid}`);
+      if (t) trades.push(t);
+    }
+  }
+  return trades;
+}

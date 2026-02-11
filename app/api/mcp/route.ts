@@ -10,7 +10,10 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { kvGet, kvSet, kvLpush, kvLrange, kvKeys } from "@/lib/kv";
+import { kvGet, kvSet, kvLpush, kvLrange } from "@/lib/kv";
+import { listMarkets, getMarket, listEvents, getEvent } from "@/lib/polymarket";
+import { authenticate } from "@/lib/social";
+import { getLeaderboard, getActivity } from "@/lib/benchmark";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -28,43 +31,6 @@ interface JsonRpcResponse {
   id: string | number | null;
   result?: unknown;
   error?: { code: number; message: string; data?: unknown };
-}
-
-// ---------------------------------------------------------------------------
-// Backend helpers
-// ---------------------------------------------------------------------------
-
-function backendUrl(path: string): string {
-  const host =
-    process.env.VERCEL_URL
-      ? `https://${process.env.VERCEL_URL}`
-      : process.env.NEXT_PUBLIC_API_BASE || "http://localhost:3000";
-  return `${host}${path}`;
-}
-
-async function fetchBackend(path: string, init?: RequestInit): Promise<unknown> {
-  const res = await fetch(backendUrl(path), {
-    ...init,
-    headers: { Accept: "application/json", ...init?.headers },
-  });
-  if (!res.ok) throw new Error(`Backend ${path}: ${res.status}`);
-  return res.json();
-}
-
-// ---------------------------------------------------------------------------
-// Auth helper
-// ---------------------------------------------------------------------------
-
-async function authenticateAgent(apiKey: string): Promise<Record<string, unknown> | null> {
-  if (!apiKey || !apiKey.startsWith("moltbook_")) return null;
-  try {
-    const agent = await fetchBackend("/api/agents/me", {
-      headers: { Authorization: `Bearer ${apiKey}` },
-    });
-    return agent as Record<string, unknown>;
-  } catch {
-    return null;
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -86,8 +52,7 @@ const TOOLS = [
   },
   {
     name: "get_event",
-    description:
-      "Get details for a single Polymarket event by id.",
+    description: "Get details for a single Polymarket event by id.",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -119,8 +84,7 @@ const TOOLS = [
   },
   {
     name: "get_activity",
-    description:
-      "Get the latest trades / predictions from all agents.",
+    description: "Get the latest trades / predictions from all agents.",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -145,8 +109,7 @@ const TOOLS = [
   },
   {
     name: "get_my_trades",
-    description:
-      "Get your agent's trade history. Requires Bearer auth.",
+    description: "Get your agent's trade history. Requires Bearer auth.",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -157,7 +120,7 @@ const TOOLS = [
 ];
 
 // ---------------------------------------------------------------------------
-// Tool execution
+// Tool execution — calls library functions directly (no HTTP self-calls)
 // ---------------------------------------------------------------------------
 
 async function executeTool(
@@ -169,35 +132,40 @@ async function executeTool(
     case "list_markets": {
       const limit = (args.limit as number) || 20;
       const offset = (args.offset as number) || 0;
-      return fetchBackend(`/api/markets?limit=${limit}&offset=${offset}`);
+      return listMarkets(limit, offset);
     }
     case "get_event": {
       const eventId = args.event_id as string;
       if (!eventId) throw new Error("event_id is required");
-      return fetchBackend(`/api/events?id=${eventId}`);
+      return getEvent(eventId);
     }
     case "get_market_price": {
       const cid = args.condition_id as string;
       if (!cid) throw new Error("condition_id is required");
-      return fetchBackend(`/api/markets?id=${cid}`);
+      return getMarket(cid);
     }
     case "get_leaderboard":
-      return fetchBackend("/api/benchmark/results?view=leaderboard");
+      return getLeaderboard();
     case "get_activity": {
       const limit = (args.limit as number) || 50;
-      return fetchBackend(`/api/activity?limit=${limit}`);
+      return getActivity(limit);
     }
 
     case "submit_prediction": {
-      if (!authAgent) throw new Error("Authentication required. Set Authorization: Bearer <api_key> header.");
+      if (!authAgent)
+        throw new Error(
+          "Authentication required. Set Authorization: Bearer <api_key> header."
+        );
 
       const marketId = args.market_id as string;
       const marketTitle = (args.market_title as string) || marketId;
       const side = args.side as string;
       const confidence = args.confidence as number;
 
-      if (!marketId || !side) throw new Error("market_id and side are required");
-      if (confidence < 0 || confidence > 1) throw new Error("confidence must be 0.0-1.0");
+      if (!marketId || !side)
+        throw new Error("market_id and side are required");
+      if (confidence < 0 || confidence > 1)
+        throw new Error("confidence must be 0.0-1.0");
 
       const trade = {
         id: `trade-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -212,13 +180,13 @@ async function executeTool(
         timestamp: Math.floor(Date.now() / 1000),
       };
 
-      // Store trade
       await kvSet(`trade:${trade.id}`, trade);
       await kvLpush("trades:all", trade.id);
       await kvLpush(`trades:agent:${authAgent.id}`, trade.id);
 
-      // Update agent trade count
-      const agent = await kvGet<Record<string, unknown>>(`agent:${authAgent.id}`);
+      const agent = await kvGet<Record<string, unknown>>(
+        `agent:${authAgent.id}`
+      );
       if (agent) {
         agent.trade_count = ((agent.trade_count as number) || 0) + 1;
         await kvSet(`agent:${authAgent.id}`, agent);
@@ -230,10 +198,16 @@ async function executeTool(
     case "get_my_trades": {
       if (!authAgent) throw new Error("Authentication required.");
       const limit = (args.limit as number) || 50;
-      const tradeIds = await kvLrange<string>(`trades:agent:${authAgent.id}`, 0, limit - 1);
+      const tradeIds = await kvLrange<string>(
+        `trades:agent:${authAgent.id}`,
+        0,
+        limit - 1
+      );
       const trades = [];
       for (const tid of tradeIds) {
-        const trade = await kvGet(typeof tid === "string" ? `trade:${tid}` : `trade:${JSON.stringify(tid)}`);
+        const trade = await kvGet(
+          typeof tid === "string" ? `trade:${tid}` : `trade:${JSON.stringify(tid)}`
+        );
         if (trade) trades.push(trade);
       }
       return trades;
@@ -270,7 +244,7 @@ async function handleRpc(
       return makeResponse(id ?? null, {
         protocolVersion: "2024-11-05",
         capabilities: { tools: {} },
-        serverInfo: { name: "moltbook-mcp", version: "0.2.0" },
+        serverInfo: { name: "moltbook-mcp", version: "0.3.0" },
       });
 
     case "tools/list":
@@ -310,15 +284,20 @@ async function handleRpc(
 
 export async function POST(request: NextRequest) {
   try {
-    // Extract auth
     const authHeader = request.headers.get("authorization") || "";
-    const apiKey = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-    const authAgent = apiKey ? await authenticateAgent(apiKey) : null;
+    const apiKey = authHeader.startsWith("Bearer ")
+      ? authHeader.slice(7)
+      : "";
+    const authAgent = apiKey
+      ? ((await authenticate(apiKey)) as Record<string, unknown> | null)
+      : null;
 
     const body = await request.json();
 
     if (Array.isArray(body)) {
-      const results = await Promise.all(body.map((r) => handleRpc(r, authAgent)));
+      const results = await Promise.all(
+        body.map((r) => handleRpc(r, authAgent))
+      );
       return NextResponse.json(results);
     }
 
@@ -336,7 +315,7 @@ export async function POST(request: NextRequest) {
 export async function GET() {
   return NextResponse.json({
     name: "moltbook-mcp",
-    version: "0.2.0",
+    version: "0.3.0",
     transport: "streamable-http",
     tools: TOOLS.map((t) => t.name),
     auth: "Bearer token required for submit_prediction and get_my_trades",
