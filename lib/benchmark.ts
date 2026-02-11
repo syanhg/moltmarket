@@ -1,13 +1,49 @@
 /**
  * Benchmark engine — leaderboard, performance history, activity.
- *
- * All data computed from real trades stored in Vercel KV.
+ * Uses resolution-based PnL when available (Polymarket outcome); else simulated.
+ * No real money: simulated $10k per agent, real prices and outcomes for scoring.
  */
 
-import { kvGet, kvLrange } from "./kv";
-import { listAgents, getAgentById } from "./social";
+import { kvGet, kvSet, kvLrange } from "./kv";
+import { listAgents } from "./social";
+import { getMarketResolution } from "./polymarket";
+import { computeTradePnl } from "./resolution";
 
 const STARTING_CASH = 10_000;
+
+/** Single-trade PnL: use pnl_realized if resolved, else legacy simulated formula. */
+function tradePnl(trade: Record<string, unknown>): number {
+  if (trade.resolved === true && trade.pnl_realized != null)
+    return trade.pnl_realized as number;
+  const conf = (trade.confidence as number) || 0.5;
+  const qty = (trade.qty as number) || 1;
+  const side = (trade.side as string) || "yes";
+  const spread = (conf - 0.5) * 2;
+  return spread * qty * (side === "yes" ? 1 : -1);
+}
+
+/**
+ * Lazy resolution: for unresolved trades with market_id, fetch Polymarket resolution,
+ * compute pnl_realized, update trade in KV and mutate in-memory.
+ */
+async function resolveUnresolvedTrades(
+  marketToTrades: Map<string, Record<string, unknown>[]>
+): Promise<void> {
+  for (const [marketId, trades] of marketToTrades) {
+    const { closed, outcomeYes } = await getMarketResolution(marketId);
+    if (!closed || outcomeYes === null) continue;
+
+    for (const trade of trades) {
+      if (trade.resolved === true) continue;
+      const pnlRealized = computeTradePnl(trade, outcomeYes);
+      trade.resolved = true;
+      trade.outcome_yes = outcomeYes;
+      trade.pnl_realized = Math.round(pnlRealized * 100) / 100;
+      trade.resolved_at = Math.floor(Date.now() / 1000);
+      await kvSet(`trade:${trade.id}`, trade);
+    }
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Leaderboard
@@ -15,19 +51,38 @@ const STARTING_CASH = 10_000;
 
 export async function getLeaderboard(): Promise<Record<string, unknown>[]> {
   const agents = await listAgents();
-  const entries: Record<string, unknown>[] = [];
+  const allTradesByAgent: Record<string, Record<string, unknown>[]> = {};
+  const marketToTrades = new Map<string, Record<string, unknown>[]>();
 
   for (const agent of agents) {
     const agentId = (agent.id as string) || "";
     const tradeIds = await kvLrange<string>(`trades:agent:${agentId}`, 0, -1);
-
     const trades: Record<string, unknown>[] = [];
+
     for (const tid of tradeIds) {
-      if (typeof tid === "string") {
-        const t = await kvGet<Record<string, unknown>>(`trade:${tid}`);
-        if (t) trades.push(t);
+      if (typeof tid !== "string") continue;
+      const t = await kvGet<Record<string, unknown>>(`trade:${tid}`);
+      if (!t) continue;
+      trades.push(t);
+
+      const mid = t.market_id as string | undefined;
+      if (mid && t.resolved !== true) {
+        const list = marketToTrades.get(mid) ?? [];
+        list.push(t);
+        marketToTrades.set(mid, list);
       }
     }
+
+    allTradesByAgent[agentId] = trades;
+  }
+
+  await resolveUnresolvedTrades(marketToTrades);
+
+  const entries: Record<string, unknown>[] = [];
+
+  for (const agent of agents) {
+    const agentId = (agent.id as string) || "";
+    const trades = allTradesByAgent[agentId] ?? [];
 
     let totalPnl = 0;
     const returnsList: number[] = [];
@@ -35,15 +90,9 @@ export async function getLeaderboard(): Promise<Record<string, unknown>[]> {
     let maxLoss = 0;
 
     for (const trade of trades) {
-      const conf = (trade.confidence as number) || 0.5;
-      const qty = (trade.qty as number) || 1;
-      const side = (trade.side as string) || "yes";
-
-      const spread = (conf - 0.5) * 2;
-      const pnl = spread * qty * (side === "yes" ? 1 : -1);
+      const pnl = tradePnl(trade);
       totalPnl += pnl;
       returnsList.push(pnl / Math.max(STARTING_CASH, 1));
-
       if (pnl > maxWin) maxWin = pnl;
       if (pnl < maxLoss) maxLoss = pnl;
     }
@@ -51,7 +100,6 @@ export async function getLeaderboard(): Promise<Record<string, unknown>[]> {
     const cash = STARTING_CASH + totalPnl;
     const returnPct = (totalPnl / STARTING_CASH) * 100;
 
-    // Sharpe ratio
     let sharpe = 0;
     if (returnsList.length > 1) {
       const meanR = returnsList.reduce((a, b) => a + b, 0) / returnsList.length;
@@ -122,11 +170,7 @@ export async function getPerformanceHistory(
     for (const trade of trades) {
       const ts = (trade.timestamp as number) || 0;
       if (ts < cutoff) continue;
-      const conf = (trade.confidence as number) || 0.5;
-      const qty = (trade.qty as number) || 1;
-      const side = (trade.side as string) || "yes";
-      const spread = (conf - 0.5) * 2;
-      const pnl = spread * qty * (side === "yes" ? 1 : -1);
+      const pnl = tradePnl(trade);
       value += pnl;
       dataPoints.push({ timestamp: ts, value: Math.round(value * 100) / 100 });
     }

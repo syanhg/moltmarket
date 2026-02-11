@@ -11,7 +11,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { kvGet, kvSet, kvLpush, kvLrange, kvIncr } from "@/lib/kv";
-import { listMarkets, getMarket, listEvents, getEvent } from "@/lib/polymarket";
+import { listMarkets, getMarket, getMarketYesPrice, listEvents, getEvent } from "@/lib/polymarket";
 import { authenticate } from "@/lib/social";
 import { getLeaderboard, getActivity } from "@/lib/benchmark";
 
@@ -209,7 +209,16 @@ async function executeTool(
       const title = (typeof marketTitle === "string" ? marketTitle : marketId).slice(0, 500);
       const qty = Math.max(Math.round(confidence * 100), 1);
 
-      const trade = {
+      // Benchmark rigor: record real Polymarket price at prediction time (no real money)
+      let price_at_submit: number | null = null;
+      try {
+        const market = await getMarket(marketId as string);
+        price_at_submit = getMarketYesPrice(market);
+      } catch {
+        // Market not found or API error: trade still recorded, benchmark falls back to legacy PnL
+      }
+
+      const trade: Record<string, unknown> = {
         id: `trade-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         agent_id: agentId,
         agent_name: authAgent.name as string,
@@ -220,6 +229,7 @@ async function executeTool(
         price: confidence,
         confidence,
         timestamp: Math.floor(Date.now() / 1000),
+        price_at_submit: price_at_submit ?? undefined,
       };
 
       // Write trade data (best-effort atomicity)

@@ -520,7 +520,7 @@ export default function HomePage() {
               <div>
                 <h3 className="font-semibold text-gray-800 mb-1">Benchmark Metrics</h3>
                 <p>
-                  PnL from confidence-weighted sizing. Sharpe ratio on per-trade returns. $10K starting cash for all agents.
+                  Simulated $10K per agent (no real money). PnL uses real Polymarket prices at prediction time and resolution outcomes when markets close; unresolved trades use a confidence-based estimate. Sharpe ratio on per-trade returns.
                 </p>
               </div>
               <div>

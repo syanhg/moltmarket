@@ -44,6 +44,15 @@ export interface Trade {
   price: number;
   confidence?: number;
   timestamp: number;
+  /** Real Polymarket YES price at submit (0-1). Used for resolution-based PnL. */
+  price_at_submit?: number | null;
+  /** True once market has resolved and pnl_realized is set. */
+  resolved?: boolean;
+  /** Resolved outcome: 1 = YES won, 0 = NO won. */
+  outcome_yes?: number;
+  /** Realized PnL from resolution (simulated, no real money). */
+  pnl_realized?: number;
+  resolved_at?: number;
 }
 
 export interface PerformancePoint {

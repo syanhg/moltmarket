@@ -89,6 +89,70 @@ export async function getMarket(conditionId: string): Promise<unknown> {
   return fetchJson(`${CLOB_BASE}/markets/${encodeURIComponent(conditionId)}`);
 }
 
+/**
+ * Extract the YES outcome price (0-1) from a CLOB market response.
+ * Used for benchmark: record real price at prediction time and for resolution.
+ */
+export function getMarketYesPrice(market: unknown): number | null {
+  if (!market || typeof market !== "object") return null;
+  const m = market as Record<string, unknown>;
+  // Tokens array: { outcome: "Yes"|"No", price: number }
+  const tokens = m.tokens as Array<{ outcome?: string; price?: number }> | undefined;
+  if (tokens?.length) {
+    const yes = tokens.find((t) => String(t.outcome).toLowerCase() === "yes");
+    if (yes?.price != null && typeof yes.price === "number")
+      return Math.max(0, Math.min(1, yes.price));
+  }
+  // outcomePrices: "0.65,0.35" or [0.65, 0.35]
+  const op = m.outcomePrices;
+  if (Array.isArray(op) && op.length > 0) {
+    const p = typeof op[0] === "string" ? parseFloat(op[0]) : op[0];
+    if (!Number.isNaN(p)) return Math.max(0, Math.min(1, p));
+  }
+  if (typeof op === "string") {
+    const first = parseFloat(op.split(",")[0]);
+    if (!Number.isNaN(first)) return Math.max(0, Math.min(1, first));
+  }
+  // bestBid / bestAsk (yes side)
+  const bestBid = m.bestBid != null ? Number(m.bestBid) : NaN;
+  const bestAsk = m.bestAsk != null ? Number(m.bestAsk) : NaN;
+  if (!Number.isNaN(bestBid) || !Number.isNaN(bestAsk)) {
+    const mid = Number.isNaN(bestBid) ? bestAsk : Number.isNaN(bestAsk) ? bestBid : (bestBid + bestAsk) / 2;
+    return Math.max(0, Math.min(1, mid));
+  }
+  return null;
+}
+
+/**
+ * Fetch market and return resolution state for binary markets.
+ * When closed, outcomePrices are typically "1,0" (YES won) or "0,1" (NO won).
+ */
+export async function getMarketResolution(
+  conditionId: string
+): Promise<{ closed: boolean; outcomeYes: number | null }> {
+  try {
+    const market = await getMarket(conditionId);
+    const m = market as Record<string, unknown> | null;
+    if (!m) return { closed: false, outcomeYes: null };
+    const active = m.active;
+    if (active === true) return { closed: false, outcomeYes: null };
+    // When closed, outcomePrices indicate result: first value = YES outcome (1 or 0)
+    const op = m.outcomePrices;
+    let outcomeYes: number | null = null;
+    if (Array.isArray(op) && op.length > 0) {
+      const p = typeof op[0] === "string" ? parseFloat(op[0]) : op[0];
+      if (!Number.isNaN(p)) outcomeYes = p > 0.5 ? 1 : p < 0.5 ? 0 : null;
+    } else if (typeof op === "string") {
+      const first = parseFloat(op.split(",")[0]);
+      if (!Number.isNaN(first)) outcomeYes = first > 0.5 ? 1 : first < 0.5 ? 0 : null;
+    }
+    const closed = active === false && outcomeYes !== null;
+    return { closed, outcomeYes };
+  } catch {
+    return { closed: false, outcomeYes: null };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Events (Gamma)
 // ---------------------------------------------------------------------------
