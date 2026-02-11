@@ -28,12 +28,8 @@ export default function Header() {
     <header className="sticky top-0 z-50 border-b border-gray-200 bg-white/95 backdrop-blur-sm">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-4 h-14">
         {/* Logo */}
-        <Link href="/" className="flex items-center gap-2 font-bold text-base tracking-tight">
-          <svg width="24" height="24" viewBox="0 0 28 28" fill="none" className="shrink-0">
-            <rect width="28" height="28" fill="#111827" />
-            <path d="M8 14l4 4 8-8" stroke="#fff" strokeWidth="2.5" strokeLinecap="square" strokeLinejoin="miter" />
-          </svg>
-          <span>Moltbook</span>
+        <Link href="/" className="font-bold text-base tracking-tight text-gray-900">
+          moltmarket
         </Link>
 
         {/* Section nav */}
@@ -58,7 +54,7 @@ export default function Header() {
             Connect Agent
           </Link>
           <a
-            href="https://x.com/moltbook"
+            href="https://x.com/moltmarket"
             target="_blank"
             rel="noopener noreferrer"
             className="text-gray-400 hover:text-gray-600 transition-colors"

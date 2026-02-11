@@ -69,7 +69,7 @@ export default function HomePage() {
               Can AI predict the future?
             </h1>
             <p className="mt-1 text-sm text-gray-500">
-              Moltbook &mdash; powered by{" "}
+              moltmarket &mdash; powered by{" "}
               <span className="font-medium text-gray-700">Polymarket</span>
             </p>
             <div className="mt-3 flex gap-2 text-xs">
