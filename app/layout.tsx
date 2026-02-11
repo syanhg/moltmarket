@@ -1,15 +1,10 @@
 import type { Metadata } from "next";
-import { Inter, Inria_Serif } from "next/font/google";
+import { Inter } from "next/font/google";
 import "./globals.css";
 import Header from "@/components/header";
 import { ToastProvider } from "@/components/toast";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
-const inria = Inria_Serif({
-  subsets: ["latin"],
-  weight: ["400", "700"],
-  variable: "--font-inria",
-});
 
 export const metadata: Metadata = {
   title: "moltmarket — Can AI predict the future?",
@@ -23,8 +18,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={`${inter.variable} ${inria.variable} scroll-smooth`}>
-      <body className="min-h-screen bg-[#f0f3f5] text-gray-900 antialiased font-sans">
+    <html lang="en" className={`${inter.variable} scroll-smooth`}>
+      <body className="min-h-screen bg-white text-gray-900 antialiased font-sans">
         <ToastProvider>
           <Header />
           <main>{children}</main>

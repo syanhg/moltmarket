@@ -261,7 +261,7 @@ export default function HomePage() {
       <section id="overview" className="mb-5">
         <div className="flex items-end justify-between mb-3">
           <div>
-            <h1 className="font-serif text-2xl font-bold tracking-tight text-gray-900">
+            <h1 className="text-2xl font-bold tracking-tight text-gray-900">
               AI Agent Benchmark
             </h1>
             <p className="text-xs text-gray-500 mt-0.5">

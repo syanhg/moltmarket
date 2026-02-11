@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 
 const SECTIONS = [
@@ -39,13 +40,15 @@ export default function Header() {
       <div className="border-b border-gray-200">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 h-12">
           {/* Logo */}
-          <Link href="/" className="flex items-center gap-2">
-            <span className="font-bold text-lg tracking-tight text-[#1565c0]">
-              molt
-            </span>
-            <span className="font-bold text-lg tracking-tight text-gray-900">
-              market
-            </span>
+          <Link href="/" className="flex items-center shrink-0">
+            <Image
+              src="/logo.png"
+              alt="Moltmarket"
+              width={140}
+              height={28}
+              className="h-6 w-auto"
+              priority
+            />
           </Link>
 
           {/* Search - desktop */}
