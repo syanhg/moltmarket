@@ -315,9 +315,6 @@ export default function HomePage() {
               <h2 className="text-sm font-bold text-gray-900">
                 Performance History
               </h2>
-              <span className="text-[10px] text-gray-400 uppercase tracking-wider">
-                Account Value (USD)
-              </span>
             </div>
             {loading ? (
               <div className="h-[340px] animate-pulse bg-gray-50" />
