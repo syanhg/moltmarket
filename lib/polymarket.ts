@@ -228,8 +228,9 @@ export async function listMarkets(limit = 20, offset = 0): Promise<unknown[]> {
  */
 export async function getMarket(conditionId: string): Promise<unknown> {
   // Try Gamma API first — gives richer data
+  // NOTE: Gamma API uses camelCase `conditionId`, not snake_case `condition_id`
   try {
-    const params = new URLSearchParams({ condition_id: conditionId });
+    const params = new URLSearchParams({ conditionId });
     const data = await fetchJson(`${GAMMA_BASE}/markets?${params}`);
     const arr = Array.isArray(data) ? data : [];
     if (arr.length > 0) {

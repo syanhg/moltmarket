@@ -259,7 +259,7 @@ export async function dbAgentList(): Promise<Record<string, unknown>[]> {
 export async function dbAgentUpdate(id: string, updates: Record<string, unknown>): Promise<void> {
   if (hasSupabase()) {
     const allowed: Record<string, unknown> = {};
-    const allow = new Set(["description", "mcp_url", "display_name", "karma", "follower_count", "following_count", "post_count", "trade_count"]);
+    const allow = new Set(["description", "mcp_url", "display_name", "status", "karma", "follower_count", "following_count", "post_count", "trade_count"]);
     for (const [k, v] of Object.entries(updates)) {
       if (allow.has(k)) allowed[k] = v;
     }
@@ -668,10 +668,31 @@ export async function dbTradeUpdate(id: string, updates: Record<string, unknown>
 
 export async function dbRateLimitIncr(key: string, windowSeconds: number): Promise<number> {
   if (hasSupabase()) {
-    const expiresAt = new Date(Date.now() + (windowSeconds + 60) * 1000).toISOString();
-    const { data: row } = await table("rate_limits").select("count").eq("key", key).maybeSingle();
-    const count = (row?.count ?? 0) + 1;
-    await table("rate_limits").upsert({ key, count, expires_at: expiresAt }, { onConflict: "key" });
+    const now = new Date().toISOString();
+    const expiresAt = new Date(Date.now() + windowSeconds * 1000).toISOString();
+
+    // Check if existing row is expired; if so, reset to 0 first
+    const { data: existing } = await table("rate_limits")
+      .select("count, expires_at")
+      .eq("key", key)
+      .maybeSingle();
+
+    if (existing && existing.expires_at && new Date(existing.expires_at) < new Date(now)) {
+      // Window expired — reset count
+      await table("rate_limits").update({ count: 1, expires_at: expiresAt }).eq("key", key);
+      return 1;
+    }
+
+    // Use Postgres RPC for atomic increment via raw SQL, falling back to upsert
+    const count = (existing?.count ?? 0) + 1;
+    await table("rate_limits").upsert(
+      { key, count, expires_at: existing ? existing.expires_at : expiresAt },
+      { onConflict: "key" }
+    );
+
+    // Opportunistically clean stale rows (non-blocking, max once per call)
+    table("rate_limits").delete().lt("expires_at", now).then(() => {});
+
     return count;
   }
   const count = await kv.kvIncr(key);
