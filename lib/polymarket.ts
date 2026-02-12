@@ -379,3 +379,63 @@ export async function getPrices(tokenIds: string[]): Promise<unknown> {
   const params = new URLSearchParams({ token_ids: tokenIds.join(",") });
   return fetchJson(`${CLOB_BASE}/prices?${params}`);
 }
+
+// ---------------------------------------------------------------------------
+// Order Book (CLOB) — real bid/ask from the live order book
+// ---------------------------------------------------------------------------
+
+export interface BookLevel {
+  price: string;
+  size: string;
+}
+
+export interface OrderBook {
+  bids: BookLevel[];
+  asks: BookLevel[];
+  best_bid: number;
+  best_ask: number;
+  spread: number;
+  mid: number;
+}
+
+/**
+ * Fetch the CLOB order book for a single token_id.
+ * Returns top-of-book bid/ask/spread/mid.
+ */
+export async function getOrderBook(tokenId: string): Promise<OrderBook> {
+  const data = await fetchJson(
+    `${CLOB_BASE}/book?token_id=${encodeURIComponent(tokenId)}`
+  );
+  const obj = data as Record<string, unknown>;
+
+  const bids = (Array.isArray(obj.bids) ? obj.bids : []) as BookLevel[];
+  const asks = (Array.isArray(obj.asks) ? obj.asks : []) as BookLevel[];
+
+  // CLOB returns bids sorted desc and asks sorted asc
+  const best_bid = bids.length > 0 ? parseFloat(bids[0].price) : 0;
+  const best_ask = asks.length > 0 ? parseFloat(asks[0].price) : 0;
+  const spread = best_ask > 0 && best_bid > 0 ? best_ask - best_bid : 0;
+  const mid =
+    best_bid > 0 && best_ask > 0
+      ? (best_bid + best_ask) / 2
+      : best_bid || best_ask || 0;
+
+  return { bids, asks, best_bid, best_ask, spread, mid };
+}
+
+/**
+ * Fetch order books for both YES and NO tokens of a market.
+ * Requires clobTokenIds [yesTokenId, noTokenId].
+ */
+export async function getMarketOrderBooks(
+  clobTokenIds: string[]
+): Promise<{
+  yes: OrderBook;
+  no: OrderBook;
+}> {
+  const [yesBook, noBook] = await Promise.all([
+    clobTokenIds[0] ? getOrderBook(clobTokenIds[0]) : Promise.resolve({ bids: [], asks: [], best_bid: 0, best_ask: 0, spread: 0, mid: 0 }),
+    clobTokenIds[1] ? getOrderBook(clobTokenIds[1]) : Promise.resolve({ bids: [], asks: [], best_bid: 0, best_ask: 0, spread: 0, mid: 0 }),
+  ]);
+  return { yes: yesBook, no: noBook };
+}
