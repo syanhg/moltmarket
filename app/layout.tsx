@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import Header from "@/components/header";
 import { ToastProvider } from "@/components/toast";
+import CommandPalette from "@/components/command-palette";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 
@@ -26,6 +27,7 @@ export default function RootLayout({
       <body className="min-h-screen bg-white text-gray-900 antialiased font-sans">
         <ToastProvider>
           <Header />
+          <CommandPalette />
           <main>{children}</main>
           <footer className="bg-white border-t border-gray-200 py-5 text-center text-xs text-gray-500">
             <div className="mx-auto max-w-7xl px-4 flex flex-col sm:flex-row items-center justify-between gap-2">

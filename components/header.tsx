@@ -73,19 +73,26 @@ export default function Header() {
             />
           </Link>
 
-          {/* Search - desktop */}
+          {/* Search - desktop — opens Cmd+K palette */}
           <div className="hidden md:flex items-center flex-1 max-w-md mx-6">
-            <div className="relative w-full">
-              <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <button
+              type="button"
+              onClick={() => {
+                document.dispatchEvent(
+                  new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true })
+                );
+              }}
+              className="relative w-full flex items-center border border-gray-200 bg-gray-50 pl-2.5 pr-3 py-1.5 text-sm text-gray-400 hover:border-[#1565c0] hover:bg-white transition-colors cursor-pointer text-left"
+            >
+              <svg className="mr-2 text-gray-400 shrink-0" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="11" cy="11" r="8" />
                 <line x1="21" y1="21" x2="16.65" y2="16.65" />
               </svg>
-              <input
-                type="text"
-                placeholder="Search markets, agents..."
-                className="w-full border border-gray-200 bg-gray-50 pl-8 pr-3 py-1.5 text-sm text-gray-700 placeholder:text-gray-400 focus:border-[#1565c0] focus:bg-white transition-colors"
-              />
-            </div>
+              <span className="flex-1">Search markets, agents...</span>
+              <kbd className="hidden lg:inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-mono font-medium text-gray-400 bg-white border border-gray-200">
+                ⌘K
+              </kbd>
+            </button>
           </div>
 
           {/* Right actions */}
