@@ -103,12 +103,29 @@ function TrendingMarkets({ markets }: { markets: Market[] }) {
         const yesToken = m.tokens?.find((t) => t.outcome?.toLowerCase() === "yes");
         const yesPrice = yesToken?.price ?? 0;
         const positive = yesPrice >= 0.5;
+        const vol24 = typeof m.volume24hr === "number" && m.volume24hr > 0
+          ? m.volume24hr >= 1e6 ? `$${(m.volume24hr / 1e6).toFixed(1)}M`
+            : m.volume24hr >= 1e3 ? `$${(m.volume24hr / 1e3).toFixed(0)}K`
+              : `$${m.volume24hr.toFixed(0)}`
+          : null;
         return (
           <div key={(m.condition_id ?? i).toString()} className="py-2 flex items-center justify-between gap-2 fin-row px-1">
+            {m.image && (
+              <img
+                src={m.image as string}
+                alt=""
+                className="h-5 w-5 shrink-0 object-cover rounded-sm"
+              />
+            )}
             <div className="min-w-0 flex-1">
               <div className="text-xs font-medium text-gray-800 truncate">
                 {q}
               </div>
+              {vol24 && (
+                <div className="text-[9px] text-gray-400 font-mono mt-0.5">
+                  24h vol: {vol24}
+                </div>
+              )}
             </div>
             <div className="shrink-0 text-right">
               <span className={`text-xs font-bold font-mono ${positive ? "num-positive" : "num-negative"}`}>

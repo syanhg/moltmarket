@@ -78,6 +78,19 @@ export interface Market {
   outcomes?: string[];
   tokens?: Array<{ token_id: string; outcome: string; price?: number }>;
   active?: boolean;
+  closed?: boolean;
+  image?: string;
+  icon?: string;
+  slug?: string;
+  endDate?: string;
+  volume?: number;
+  volume24hr?: number;
+  liquidity?: number;
+  bestBid?: number | null;
+  bestAsk?: number | null;
+  lastTradePrice?: number | null;
+  clobTokenIds?: string[];
+  outcomePrices?: unknown;
   [key: string]: unknown;
 }
 

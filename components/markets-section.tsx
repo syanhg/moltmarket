@@ -11,32 +11,38 @@ type SortField = "question" | "yes_price" | "volume" | "spread";
 type SortDir = "asc" | "desc";
 
 function extractPrice(market: Market, outcome: string): number {
+  // Prefer normalised tokens (from Gamma normalisation)
   if (market.tokens && Array.isArray(market.tokens)) {
     const token = market.tokens.find(
       (t) => t.outcome?.toLowerCase() === outcome.toLowerCase()
     );
-    if (token?.price != null) return token.price;
+    if (token?.price != null && token.price > 0) return token.price;
   }
-  const obj = market as Record<string, unknown>;
-  if (outcome === "yes") {
-    const p = obj.outcomePrices ?? obj.best_bid ?? obj.yes_price;
-    if (typeof p === "number") return p;
-    if (typeof p === "string") return parseFloat(p) || 0;
-    if (Array.isArray(p) && p.length > 0) return parseFloat(String(p[0])) || 0;
+  // Fallback: parse outcomePrices
+  const op = market.outcomePrices;
+  const idx = outcome.toLowerCase() === "yes" ? 0 : 1;
+  if (typeof op === "string") {
+    try {
+      const parsed = JSON.parse(op);
+      if (Array.isArray(parsed) && parsed.length > idx)
+        return parseFloat(String(parsed[idx])) || 0;
+    } catch {
+      const parts = op.split(",");
+      if (parts.length > idx) return parseFloat(parts[idx]) || 0;
+    }
   }
-  if (outcome === "no") {
-    const p = obj.best_ask ?? obj.no_price;
-    if (typeof p === "number") return p;
-    if (typeof p === "string") return parseFloat(p) || 0;
-    const prices = obj.outcomePrices;
-    if (Array.isArray(prices) && prices.length > 1) return parseFloat(String(prices[1])) || 0;
-  }
+  if (Array.isArray(op) && op.length > idx)
+    return parseFloat(String(op[idx])) || 0;
+
   return 0;
 }
 
 function extractVolume(market: Market): number {
+  // Normalised Gamma data puts volume as a number directly
+  if (typeof market.volume === "number") return market.volume;
+  if (typeof market.volume === "string") return parseFloat(market.volume) || 0;
   const obj = market as Record<string, unknown>;
-  const v = obj.volume ?? obj.volume_num ?? obj.volumeNum ?? 0;
+  const v = obj.volumeNum ?? obj.volume_num ?? 0;
   if (typeof v === "number") return v;
   if (typeof v === "string") return parseFloat(v) || 0;
   return 0;
@@ -201,15 +207,24 @@ export default function MarketsSection({ markets: initialMarkets }: Props) {
                     {page * pageSize + i + 1}
                   </td>
                   <td className="px-3 py-2.5">
-                    <div className="max-w-[340px]">
-                      <div className="text-gray-800 font-medium text-xs leading-snug truncate">
-                        {m.question}
-                      </div>
-                      {m.conditionId && (
-                        <div className="text-[9px] text-gray-400 font-mono mt-0.5">
-                          {m.conditionId.slice(0, 14)}
-                        </div>
+                    <div className="max-w-[340px] flex items-center gap-2">
+                      {m.raw.image && (
+                        <img
+                          src={m.raw.image as string}
+                          alt=""
+                          className="h-6 w-6 shrink-0 object-cover rounded-sm"
+                        />
                       )}
+                      <div className="min-w-0">
+                        <div className="text-gray-800 font-medium text-xs leading-snug truncate">
+                          {m.question}
+                        </div>
+                        {m.conditionId && (
+                          <div className="text-[9px] text-gray-400 font-mono mt-0.5">
+                            {m.conditionId.slice(0, 14)}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </td>
                   <td className="px-3 py-2.5 text-right">
