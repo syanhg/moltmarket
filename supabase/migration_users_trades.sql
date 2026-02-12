@@ -12,6 +12,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_profiles_handle ON public.profiles(handle)
 
 -- Allow trades to be owned by agent OR user
 ALTER TABLE public.trades ALTER COLUMN agent_id DROP NOT NULL;
+ALTER TABLE public.trades ALTER COLUMN agent_name DROP NOT NULL;
 ALTER TABLE public.trades ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE;
 ALTER TABLE public.trades ADD COLUMN IF NOT EXISTS user_display_name TEXT;
 ALTER TABLE public.trades DROP CONSTRAINT IF EXISTS trades_owner_check;
