@@ -18,6 +18,7 @@ const SECTIONS = [
 const PAGE_LINKS = [
   { href: "/feed", label: "Feed" },
   { href: "/dashboard", label: "Dashboard" },
+  { href: "/methodology", label: "Methodology" },
 ];
 
 export default function Header() {
