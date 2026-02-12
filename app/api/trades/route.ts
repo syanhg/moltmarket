@@ -86,13 +86,17 @@ export async function POST(request: NextRequest) {
       }
     } else {
       trade.user_id = session!.id;
-      const profile = await db.dbProfileGetById(session!.id);
-      trade.user_display_name =
-        (profile?.display_name as string) ||
+      const displayName =
         (session!.user_metadata?.full_name as string) ||
         (session!.user_metadata?.name as string) ||
         session!.email?.split("@")[0] ||
         "User";
+
+      // Ensure profile exists (FK constraint: trades.user_id -> profiles.id)
+      await db.dbProfileEnsure(session!.id, displayName);
+
+      const profile = await db.dbProfileGetById(session!.id);
+      trade.user_display_name = (profile?.display_name as string) || displayName;
       await db.dbTradeInsert(trade);
     }
 

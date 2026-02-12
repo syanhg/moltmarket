@@ -1,6 +1,8 @@
 /**
  * Data layer: Supabase (Postgres) when env is set, else Vercel KV.
  * Single interface so social, benchmark, MCP, resolution all use this.
+ *
+ * IMPORTANT: All Supabase write operations check for errors and throw.
  */
 
 import { supabase, hasSupabase } from "./supabase";
@@ -10,6 +12,13 @@ import * as kv from "./kv";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function table(name: string): any {
   return supabase().from(name);
+}
+
+/** Throw if Supabase returned an error. */
+function throwIfError(result: { error: { message: string; code?: string } | null }, context: string): void {
+  if (result.error) {
+    throw new Error(`DB error [${context}]: ${result.error.message} (code: ${result.error.code ?? "unknown"})`);
+  }
 }
 
 
@@ -178,7 +187,7 @@ function tradeRowToRecord(r: TradeRow): Record<string, unknown> {
 
 export async function dbAgentInsert(row: Omit<AgentRow, "created_at"> & { created_at?: number }): Promise<void> {
   if (hasSupabase()) {
-    await table("agents").insert({
+    const result = await table("agents").insert({
       id: row.id,
       name: row.name,
       api_key_hash: row.api_key_hash,
@@ -192,6 +201,7 @@ export async function dbAgentInsert(row: Omit<AgentRow, "created_at"> & { create
       post_count: row.post_count,
       trade_count: row.trade_count,
     });
+    throwIfError(result, "agents.insert");
     return;
   }
   const created_at = row.created_at ?? Date.now() / 1000;
@@ -263,7 +273,10 @@ export async function dbAgentUpdate(id: string, updates: Record<string, unknown>
     for (const [k, v] of Object.entries(updates)) {
       if (allow.has(k)) allowed[k] = v;
     }
-    if (Object.keys(allowed).length) await table("agents").update(allowed).eq("id", id);
+    if (Object.keys(allowed).length) {
+      const result = await table("agents").update(allowed).eq("id", id);
+      throwIfError(result, "agents.update");
+    }
     return;
   }
   const agent = await kv.kvGet<Record<string, unknown>>(`agent:${id}`);
@@ -278,10 +291,11 @@ export async function dbAgentUpdate(id: string, updates: Record<string, unknown>
 
 export async function dbFollowAdd(followerId: string, followingId: string): Promise<void> {
   if (hasSupabase()) {
-    await table("follows").upsert(
+    const result = await table("follows").upsert(
       { follower_id: followerId, following_id: followingId },
       { onConflict: "follower_id,following_id" }
     );
+    throwIfError(result, "follows.upsert");
     return;
   }
   await kv.kvSet(`follow:${followerId}:${followingId}`, true);
@@ -295,7 +309,6 @@ export async function dbFollowRemove(followerId: string, followingId: string): P
     return;
   }
   await kv.kvDel(`follow:${followerId}:${followingId}`);
-  // KV doesn't support list remove by value easily; we leave followers/following lists as-is and rely on count updates
 }
 
 export async function dbFollowExists(followerId: string, followingId: string): Promise<boolean> {
@@ -314,7 +327,7 @@ export async function dbFollowExists(followerId: string, followingId: string): P
 export async function dbPostInsert(row: Omit<PostRow, "created_at"> & { created_at?: number }): Promise<void> {
   const created = row.created_at ?? Date.now() / 1000;
   if (hasSupabase()) {
-    await table("posts").insert({
+    const result = await table("posts").insert({
       id: row.id,
       author_id: row.author_id,
       author_name: row.author_name,
@@ -329,6 +342,7 @@ export async function dbPostInsert(row: Omit<PostRow, "created_at"> & { created_
       downvotes: row.downvotes,
       comment_count: row.comment_count,
     });
+    throwIfError(result, "posts.insert");
     return;
   }
   const post = { ...row, created_at: created };
@@ -410,7 +424,10 @@ export async function dbPostUpdate(id: string, updates: Record<string, unknown>)
     for (const [k, v] of Object.entries(updates)) {
       if (allow.has(k)) obj[k] = v;
     }
-    if (Object.keys(obj).length) await table("posts").update(obj).eq("id", id);
+    if (Object.keys(obj).length) {
+      const result = await table("posts").update(obj).eq("id", id);
+      throwIfError(result, "posts.update");
+    }
     return;
   }
   const post = await kv.kvGet<Record<string, unknown>>(`post:${id}`);
@@ -426,7 +443,7 @@ export async function dbPostUpdate(id: string, updates: Record<string, unknown>)
 
 export async function dbCommentInsert(row: Omit<CommentRow, "created_at"> & { created_at?: number }): Promise<void> {
   if (hasSupabase()) {
-    await table("comments").insert({
+    const result = await table("comments").insert({
       id: row.id,
       post_id: row.post_id,
       author_id: row.author_id,
@@ -439,6 +456,7 @@ export async function dbCommentInsert(row: Omit<CommentRow, "created_at"> & { cr
       downvotes: row.downvotes,
       depth: row.depth,
     });
+    throwIfError(result, "comments.insert");
     return;
   }
   const comment = { ...row, created_at: row.created_at ?? Date.now() / 1000 };
@@ -478,7 +496,10 @@ export async function dbCommentUpdate(id: string, updates: Record<string, unknow
     for (const [k, v] of Object.entries(updates)) {
       if (allow.has(k)) obj[k] = v;
     }
-    if (Object.keys(obj).length) await table("comments").update(obj).eq("id", id);
+    if (Object.keys(obj).length) {
+      const result = await table("comments").update(obj).eq("id", id);
+      throwIfError(result, "comments.update");
+    }
     return;
   }
   const comment = await kv.kvGet<Record<string, unknown>>(`comment:${id}`);
@@ -505,10 +526,11 @@ export async function dbVoteSet(agentId: string, targetType: string, targetId: s
     if (value === 0) {
       await table("votes").delete().eq("agent_id", agentId).eq("target_type", targetType).eq("target_id", targetId);
     } else {
-      await table("votes").upsert(
+      const result = await table("votes").upsert(
         { agent_id: agentId, target_type: targetType, target_id: targetId, value },
         { onConflict: "agent_id,target_type,target_id" }
       );
+      throwIfError(result, "votes.upsert");
     }
     return;
   }
@@ -541,7 +563,7 @@ export async function dbProfileUpsert(profile: {
   handle?: string | null;
 }): Promise<void> {
   if (hasSupabase()) {
-    await table("profiles").upsert(
+    const result = await table("profiles").upsert(
       {
         id: profile.id,
         display_name: profile.display_name ?? null,
@@ -549,7 +571,19 @@ export async function dbProfileUpsert(profile: {
       },
       { onConflict: "id" }
     );
+    throwIfError(result, "profiles.upsert");
   }
+}
+
+/**
+ * Ensure a profile row exists for the given user. Creates one if missing.
+ * Must be called before inserting a human user trade (FK constraint).
+ */
+export async function dbProfileEnsure(userId: string, displayName?: string): Promise<void> {
+  if (!hasSupabase()) return;
+  const existing = await dbProfileGetById(userId);
+  if (existing) return;
+  await dbProfileUpsert({ id: userId, display_name: displayName ?? "User" });
 }
 
 // ---------------------------------------------------------------------------
@@ -558,7 +592,15 @@ export async function dbProfileUpsert(profile: {
 
 export async function dbTradeInsert(trade: Record<string, unknown>): Promise<void> {
   if (hasSupabase()) {
-    await table("trades").insert({
+    // Ensure profile exists for human user trades (FK: user_id -> profiles.id)
+    if (trade.user_id && !trade.agent_id) {
+      await dbProfileEnsure(
+        trade.user_id as string,
+        (trade.user_display_name as string) ?? "User"
+      );
+    }
+
+    const result = await table("trades").insert({
       id: trade.id,
       agent_id: trade.agent_id ?? null,
       agent_name: trade.agent_name ?? null,
@@ -576,12 +618,15 @@ export async function dbTradeInsert(trade: Record<string, unknown>): Promise<voi
       pnl_realized: null,
       resolved_at: null,
     });
+    throwIfError(result, "trades.insert");
     return;
   }
   await kv.kvSet(`trade:${trade.id}`, trade);
   await kv.kvLpush("trades:all", trade.id);
   const aid = trade.agent_id as string | undefined;
   if (aid) await kv.kvLpush(`trades:agent:${aid}`, trade.id);
+  const uid = trade.user_id as string | undefined;
+  if (uid) await kv.kvLpush(`trades:user:${uid}`, trade.id);
 }
 
 export async function dbTradeGetByAgentId(agentId: string, limit: number): Promise<Record<string, unknown>[]> {
@@ -633,7 +678,14 @@ export async function dbTradeListByUserId(userId: string, limit?: number): Promi
     const { data } = await q;
     return (data || []).map((r: TradeRow) => tradeRowToRecord(r));
   }
-  return [];
+  // KV fallback: read from user-specific trade list
+  const tradeIds = await kv.kvLrange<string>(`trades:user:${userId}`, 0, (limit ?? 200) - 1);
+  const trades: Record<string, unknown>[] = [];
+  for (const tid of tradeIds) {
+    const t = await kv.kvGet<Record<string, unknown>>(`trade:${tid}`);
+    if (t) trades.push(t);
+  }
+  return trades;
 }
 
 export async function dbTradeGetById(id: string): Promise<Record<string, unknown> | null> {
@@ -652,7 +704,10 @@ export async function dbTradeUpdate(id: string, updates: Record<string, unknown>
     for (const [k, v] of Object.entries(updates)) {
       if (allow.has(k)) obj[k] = v;
     }
-    if (Object.keys(obj).length) await table("trades").update(obj).eq("id", id);
+    if (Object.keys(obj).length) {
+      const result = await table("trades").update(obj).eq("id", id);
+      throwIfError(result, "trades.update");
+    }
     return;
   }
   const trade = await kv.kvGet<Record<string, unknown>>(`trade:${id}`);
