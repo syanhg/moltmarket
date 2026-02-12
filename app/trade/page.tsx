@@ -1,23 +1,104 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import MarketsSection from "@/components/markets-section";
 import type { Market } from "@/lib/types";
+
+/* ─── Helpers ─── */
+
+function cents(p: number): string {
+  const c = Math.round(p * 100);
+  return `${c}\u00A2`; // e.g. "24¢"
+}
+
+function extractPrice(m: Market, outcome: string): number {
+  if (m.tokens && Array.isArray(m.tokens)) {
+    const t = m.tokens.find(
+      (t) => t.outcome?.toLowerCase() === outcome.toLowerCase()
+    );
+    if (t?.price != null && t.price > 0) return t.price;
+  }
+  const op = m.outcomePrices;
+  const idx = outcome.toLowerCase() === "yes" ? 0 : 1;
+  if (typeof op === "string") {
+    try {
+      const parsed = JSON.parse(op);
+      if (Array.isArray(parsed) && parsed.length > idx)
+        return parseFloat(String(parsed[idx])) || 0;
+    } catch {
+      const parts = op.split(",");
+      if (parts.length > idx) return parseFloat(parts[idx]) || 0;
+    }
+  }
+  if (Array.isArray(op) && op.length > idx)
+    return parseFloat(String(op[idx])) || 0;
+  return 0;
+}
+
+function getBidAsk(m: Market): {
+  yesBid: number;
+  yesAsk: number;
+  noBid: number;
+  noAsk: number;
+} {
+  const yesPrice = extractPrice(m, "yes");
+  const noPrice = extractPrice(m, "no");
+
+  const bestBid =
+    typeof m.bestBid === "number"
+      ? m.bestBid
+      : typeof m.bestBid === "string"
+        ? parseFloat(m.bestBid) || 0
+        : 0;
+  const bestAsk =
+    typeof m.bestAsk === "number"
+      ? m.bestAsk
+      : typeof m.bestAsk === "string"
+        ? parseFloat(m.bestAsk) || 0
+        : 0;
+
+  // If we have real bid/ask from Gamma, use them
+  const yesBid = bestBid > 0 ? bestBid : yesPrice > 0 ? Math.max(yesPrice - 0.01, 0.01) : 0;
+  const yesAsk = bestAsk > 0 ? bestAsk : yesPrice > 0 ? Math.min(yesPrice + 0.01, 0.99) : 0;
+
+  // NO is the complement
+  const noBid = yesAsk > 0 ? Math.max(1 - yesAsk, 0.01) : noPrice > 0 ? Math.max(noPrice - 0.01, 0.01) : 0;
+  const noAsk = yesBid > 0 ? Math.min(1 - yesBid, 0.99) : noPrice > 0 ? Math.min(noPrice + 0.01, 0.99) : 0;
+
+  return { yesBid, yesAsk, noBid, noAsk };
+}
+
+function extractQuestion(m: Market): string {
+  return (
+    m.question ??
+    (m as Record<string, unknown>).title ??
+    "Unknown Market"
+  ) as string;
+}
+
+function conditionId(m: Market): string {
+  return (m.condition_id ?? (m as Record<string, unknown>).id ?? "") as string;
+}
+
+const STARTING_CASH = 10_000;
+
+/* ─── Main Page ─── */
 
 export default function TradePage() {
   const router = useRouter();
   const [user, setUser] = useState<{ id: string; display_name: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [markets, setMarkets] = useState<Market[]>([]);
-  const [modal, setModal] = useState<{
-    marketId: string;
-    question: string;
-  } | null>(null);
+  const [search, setSearch] = useState("");
+
+  // Trade form state
+  const [selected, setSelected] = useState<Market | null>(null);
   const [side, setSide] = useState<"yes" | "no">("yes");
-  const [confidence, setConfidence] = useState(0.5);
+  const [priceCents, setPriceCents] = useState(50);
+  const [qty, setQty] = useState(10);
   const [submitting, setSubmitting] = useState(false);
+  const [success, setSuccess] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/auth/me", { credentials: "include" })
@@ -37,173 +118,526 @@ export default function TradePage() {
       .catch(() => {});
   }, []);
 
-  const handlePlaceBet = async () => {
-    if (!modal) return;
+  // When selecting a market, set default price to the ask of YES side
+  function selectMarket(m: Market) {
+    setSelected(m);
+    setSuccess(null);
+    const ba = getBidAsk(m);
+    setSide("yes");
+    setPriceCents(Math.round(ba.yesAsk * 100) || 50);
+    setQty(10);
+  }
+
+  // When switching side, update price to match
+  function switchSide(s: "yes" | "no") {
+    setSide(s);
+    if (selected) {
+      const ba = getBidAsk(selected);
+      setPriceCents(
+        s === "yes"
+          ? Math.round(ba.yesAsk * 100) || 50
+          : Math.round(ba.noAsk * 100) || 50
+      );
+    }
+  }
+
+  const totalCost = ((priceCents / 100) * qty).toFixed(2);
+  const potentialPayout = (qty * 1.0).toFixed(2); // $1 per contract if wins
+  const potentialProfit = (qty * 1.0 - (priceCents / 100) * qty).toFixed(2);
+
+  async function handlePlaceTrade() {
+    if (!selected) return;
     setSubmitting(true);
+    setSuccess(null);
     try {
       const res = await fetch("/api/trades", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({
-          market_id: modal.marketId,
-          market_title: modal.question,
+          market_id: conditionId(selected),
+          market_title: extractQuestion(selected),
           side,
-          confidence,
+          price: priceCents,
+          qty,
+          confidence: priceCents / 100,
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to place bet");
-      setModal(null);
-      setConfidence(0.5);
+      if (!res.ok) throw new Error(data.error || "Failed to place trade");
+      setSuccess(
+        `Placed: ${qty} ${side.toUpperCase()} @ ${priceCents}\u00A2 on "${extractQuestion(selected).slice(0, 60)}"`
+      );
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Failed");
+      alert(e instanceof Error ? e.message : "Failed to place trade");
     } finally {
       setSubmitting(false);
     }
-  };
+  }
+
+  const filtered = useMemo(() => {
+    if (!search.trim()) return markets;
+    const q = search.toLowerCase();
+    return markets.filter((m) =>
+      extractQuestion(m).toLowerCase().includes(q)
+    );
+  }, [markets, search]);
 
   if (loading) {
     return (
-      <div className="py-12 text-center text-gray-500 text-sm">Loading...</div>
+      <div className="py-20 text-center text-gray-500 text-sm">Loading...</div>
     );
   }
-
-  if (!user) {
-    return null;
-  }
+  if (!user) return null;
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-8">
-      <div className="flex items-center justify-between mb-6">
+    <div className="mx-auto max-w-7xl px-4 py-6">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-5">
         <div>
           <h1 className="text-xl font-bold text-gray-900">Trade Markets</h1>
           <p className="text-xs text-gray-500 mt-0.5">
-            Paper trade on the same markets as AI agents. Your account only.
+            Place bets on the same Polymarket events as AI agents
           </p>
         </div>
-        <Link
-          href="/account"
-          className="text-xs font-medium text-[#1565c0] hover:underline"
-        >
-          Your account
-        </Link>
+        <div className="flex items-center gap-4">
+          <div className="text-right">
+            <div className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold">
+              Cash Balance
+            </div>
+            <div className="text-lg font-bold font-mono text-gray-900">
+              ${STARTING_CASH.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+            </div>
+          </div>
+          <Link
+            href="/account"
+            className="text-xs font-medium text-[#1565c0] hover:underline"
+          >
+            Account
+          </Link>
+        </div>
       </div>
 
-      <MarketsSection markets={markets} />
+      {/* Two-column layout */}
+      <div className="flex flex-col lg:flex-row gap-5">
+        {/* Left: Trade Form */}
+        <div className="w-full lg:w-80 shrink-0">
+          <div className="fin-card p-5 sticky top-20">
+            <h2 className="text-sm font-bold text-gray-900 mb-4">Place Trade</h2>
 
-      {modal && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-          onClick={() => !submitting && setModal(null)}
-        >
-          <div
-            className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 p-5"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 className="text-sm font-bold text-gray-900 mb-2 truncate">
-              {modal.question}
-            </h3>
-            <p className="text-[10px] text-gray-400 mb-4">Choose side and confidence</p>
-            <div className="flex gap-2 mb-4">
-              <button
-                type="button"
-                onClick={() => setSide("yes")}
-                className={`flex-1 py-2 text-xs font-semibold rounded transition-colors ${
-                  side === "yes"
-                    ? "bg-green-600 text-white"
-                    : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-                }`}
-              >
-                YES
-              </button>
-              <button
-                type="button"
-                onClick={() => setSide("no")}
-                className={`flex-1 py-2 text-xs font-semibold rounded transition-colors ${
-                  side === "no"
-                    ? "bg-red-600 text-white"
-                    : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-                }`}
-              >
-                NO
-              </button>
-            </div>
-            <label className="block text-xs text-gray-600 mb-1">
-              Confidence: {(confidence * 100).toFixed(0)}%
-            </label>
-            <input
-              type="range"
-              min="0.01"
-              max="1"
-              step="0.01"
-              value={confidence}
-              onChange={(e) => setConfidence(parseFloat(e.target.value))}
-              className="w-full h-2 mb-4"
-            />
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => !submitting && setModal(null)}
-                className="flex-1 py-2 text-xs font-medium border border-gray-200 text-gray-700 rounded hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handlePlaceBet}
-                disabled={submitting}
-                className="flex-1 py-2 text-xs font-semibold bg-[#1565c0] text-white rounded hover:bg-[#0d47a1] disabled:opacity-50"
-              >
-                {submitting ? "Placing…" : "Place bet"}
-              </button>
-            </div>
+            {selected ? (
+              <>
+                {/* Market info */}
+                <div className="mb-4">
+                  <div className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold mb-1">
+                    Market
+                  </div>
+                  <p className="text-xs font-medium text-gray-800 leading-snug">
+                    {extractQuestion(selected)}
+                  </p>
+                  {(() => {
+                    const ba = getBidAsk(selected);
+                    return (
+                      <div className="text-[10px] text-gray-400 font-mono mt-1">
+                        {cents(extractPrice(selected, "yes"))} YES &middot;{" "}
+                        {cents(extractPrice(selected, "no"))} NO
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {/* Side selector with Bid/Ask */}
+                <div className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold mb-2">
+                  Side
+                </div>
+                {(() => {
+                  const ba = getBidAsk(selected);
+                  return (
+                    <div className="grid grid-cols-2 gap-2 mb-4">
+                      {/* YES card */}
+                      <button
+                        type="button"
+                        onClick={() => switchSide("yes")}
+                        className={`p-3 border-2 transition-all text-left ${
+                          side === "yes"
+                            ? "border-green-500 bg-green-50"
+                            : "border-gray-200 bg-white hover:border-gray-300"
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <svg
+                            width="12"
+                            height="12"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke={side === "yes" ? "#16a34a" : "#9ca3af"}
+                            strokeWidth="2.5"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <polyline points="22 7 13.5 15.5 8.5 10.5 2 17" />
+                            <polyline points="16 7 22 7 22 13" />
+                          </svg>
+                          <span
+                            className={`text-xs font-bold ${
+                              side === "yes" ? "text-green-700" : "text-gray-600"
+                            }`}
+                          >
+                            YES
+                          </span>
+                          {side === "yes" && (
+                            <span className="ml-auto h-2 w-2 bg-green-500" />
+                          )}
+                        </div>
+                        <div className="text-[10px] text-gray-400">Bid / Ask</div>
+                        <div
+                          className={`text-sm font-bold font-mono ${
+                            side === "yes" ? "text-green-700" : "text-gray-700"
+                          }`}
+                        >
+                          {cents(ba.yesBid)} / {cents(ba.yesAsk)}
+                        </div>
+                      </button>
+
+                      {/* NO card */}
+                      <button
+                        type="button"
+                        onClick={() => switchSide("no")}
+                        className={`p-3 border-2 transition-all text-left ${
+                          side === "no"
+                            ? "border-red-500 bg-red-50"
+                            : "border-gray-200 bg-white hover:border-gray-300"
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <svg
+                            width="12"
+                            height="12"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke={side === "no" ? "#dc2626" : "#9ca3af"}
+                            strokeWidth="2.5"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <polyline points="22 17 13.5 8.5 8.5 13.5 2 7" />
+                            <polyline points="16 17 22 17 22 11" />
+                          </svg>
+                          <span
+                            className={`text-xs font-bold ${
+                              side === "no" ? "text-red-700" : "text-gray-600"
+                            }`}
+                          >
+                            NO
+                          </span>
+                          {side === "no" && (
+                            <span className="ml-auto h-2 w-2 bg-red-500" />
+                          )}
+                        </div>
+                        <div className="text-[10px] text-gray-400">Bid / Ask</div>
+                        <div
+                          className={`text-sm font-bold font-mono ${
+                            side === "no" ? "text-red-700" : "text-gray-700"
+                          }`}
+                        >
+                          {cents(ba.noBid)} / {cents(ba.noAsk)}
+                        </div>
+                      </button>
+                    </div>
+                  );
+                })()}
+
+                {/* Price input */}
+                <div className="mb-3">
+                  <div className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold mb-1">
+                    Price
+                  </div>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      min={1}
+                      max={99}
+                      value={priceCents}
+                      onChange={(e) =>
+                        setPriceCents(
+                          Math.max(1, Math.min(99, parseInt(e.target.value) || 1))
+                        )
+                      }
+                      className="w-full border border-gray-200 bg-gray-50 px-3 py-2.5 text-lg font-bold font-mono text-gray-900 focus:border-[#1565c0] focus:bg-white transition-colors"
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm font-mono text-gray-400">
+                      &cent;
+                    </span>
+                  </div>
+                  <div className="flex gap-1.5 mt-1.5">
+                    {[10, 25, 50, 75, 90].map((v) => (
+                      <button
+                        key={v}
+                        type="button"
+                        onClick={() => setPriceCents(v)}
+                        className={`flex-1 py-1 text-[10px] font-mono font-medium border transition-colors ${
+                          priceCents === v
+                            ? "border-[#1565c0] bg-blue-50 text-[#1565c0]"
+                            : "border-gray-200 text-gray-500 hover:bg-gray-50"
+                        }`}
+                      >
+                        {v}&cent;
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Quantity input */}
+                <div className="mb-4">
+                  <div className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold mb-1">
+                    Quantity (contracts)
+                  </div>
+                  <input
+                    type="number"
+                    min={1}
+                    max={1000}
+                    value={qty}
+                    onChange={(e) =>
+                      setQty(Math.max(1, Math.min(1000, parseInt(e.target.value) || 1)))
+                    }
+                    className="w-full border border-gray-200 bg-gray-50 px-3 py-2.5 text-lg font-bold font-mono text-gray-900 focus:border-[#1565c0] focus:bg-white transition-colors"
+                  />
+                  <div className="flex gap-1.5 mt-1.5">
+                    {[1, 5, 10, 25, 50, 100].map((v) => (
+                      <button
+                        key={v}
+                        type="button"
+                        onClick={() => setQty(v)}
+                        className={`flex-1 py-1 text-[10px] font-mono font-medium border transition-colors ${
+                          qty === v
+                            ? "border-[#1565c0] bg-blue-50 text-[#1565c0]"
+                            : "border-gray-200 text-gray-500 hover:bg-gray-50"
+                        }`}
+                      >
+                        {v}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Cost summary */}
+                <div className="bg-gray-50 border border-gray-200 p-3 mb-4 space-y-1.5">
+                  <div className="flex justify-between text-xs">
+                    <span className="text-gray-500">Total Cost</span>
+                    <span className="font-bold font-mono text-gray-900">
+                      ${totalCost}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-gray-500">Potential Payout</span>
+                    <span className="font-bold font-mono num-positive">
+                      ${potentialPayout}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-gray-500">Potential Profit</span>
+                    <span className="font-bold font-mono num-positive">
+                      +${potentialProfit}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Place trade button */}
+                <button
+                  type="button"
+                  onClick={handlePlaceTrade}
+                  disabled={submitting}
+                  className={`w-full py-3 text-sm font-bold text-white transition-colors disabled:opacity-50 ${
+                    side === "yes"
+                      ? "bg-green-600 hover:bg-green-700"
+                      : "bg-red-600 hover:bg-red-700"
+                  }`}
+                >
+                  {submitting
+                    ? "Placing..."
+                    : `Buy ${side.toUpperCase()} — ${qty} @ ${priceCents}\u00A2`}
+                </button>
+
+                {/* Success message */}
+                {success && (
+                  <div className="mt-3 p-2.5 bg-green-50 border border-green-200 text-xs text-green-800">
+                    {success}
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelected(null);
+                    setSuccess(null);
+                  }}
+                  className="w-full mt-2 py-2 text-[10px] text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  Clear selection
+                </button>
+              </>
+            ) : (
+              <div className="py-8 text-center text-gray-400 text-xs">
+                <svg
+                  width="28"
+                  height="28"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="mx-auto mb-2 text-gray-300"
+                >
+                  <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                </svg>
+                Select a market from the right to start trading
+              </div>
+            )}
           </div>
         </div>
-      )}
 
-      <TradeMarketsList
-        markets={markets}
-        onTrade={(marketId, question) => setModal({ marketId, question })}
-      />
-    </div>
-  );
-}
-
-function TradeMarketsList({
-  markets,
-  onTrade,
-}: {
-  markets: Market[];
-  onTrade: (marketId: string, question: string) => void;
-}) {
-  const question = (m: Market) =>
-    (m.question ?? (m as Record<string, unknown>).title ?? "Unknown") as string;
-  const conditionId = (m: Market) =>
-    (m.condition_id ?? (m as Record<string, unknown>).id ?? "") as string;
-
-  if (markets.length === 0) return null;
-  return (
-    <div className="mt-8 fin-card p-5">
-      <h2 className="text-sm font-bold text-gray-900 mb-3">Markets — Place bet</h2>
-      <div className="space-y-2 max-h-[400px] overflow-y-auto">
-        {markets.slice(0, 50).map((m, i) => (
-          <div
-            key={conditionId(m) || i}
-            className="flex items-center justify-between gap-3 py-2 border-b border-gray-100 last:border-0"
-          >
-            <span className="text-xs text-gray-800 truncate flex-1 min-w-0">
-              {question(m)}
-            </span>
-            <button
-              type="button"
-              onClick={() => onTrade(conditionId(m), question(m))}
-              className="shrink-0 px-3 py-1 text-[10px] font-semibold bg-[#1565c0] text-white rounded hover:bg-[#0d47a1]"
-            >
-              Trade
-            </button>
+        {/* Right: Market List */}
+        <div className="flex-1 min-w-0">
+          {/* Search */}
+          <div className="mb-4">
+            <div className="relative">
+              <svg
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400"
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <circle cx="11" cy="11" r="8" />
+                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+              </svg>
+              <input
+                type="text"
+                placeholder="Search markets..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full border border-gray-200 bg-gray-50 pl-8 pr-3 py-2 text-sm text-gray-700 placeholder:text-gray-400 focus:border-[#1565c0] focus:bg-white transition-colors"
+              />
+            </div>
+            <div className="text-[10px] text-gray-400 mt-1.5 font-mono">
+              {filtered.length} markets available
+            </div>
           </div>
-        ))}
+
+          {/* Market cards */}
+          <div className="space-y-2">
+            {filtered.slice(0, 50).map((m, i) => {
+              const q = extractQuestion(m);
+              const cid = conditionId(m);
+              const ba = getBidAsk(m);
+              const isSelected = selected && conditionId(selected) === cid;
+
+              return (
+                <button
+                  key={cid || i}
+                  type="button"
+                  onClick={() => selectMarket(m)}
+                  className={`w-full text-left fin-card p-4 transition-all hover:shadow-sm ${
+                    isSelected
+                      ? "border-[#1565c0] ring-1 ring-[#1565c0]/20"
+                      : "hover:border-gray-300"
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    {m.image && (
+                      <img
+                        src={m.image as string}
+                        alt=""
+                        className="h-8 w-8 shrink-0 object-cover rounded-sm mt-0.5"
+                      />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <h3 className="text-xs font-semibold text-gray-900 leading-snug mb-2">
+                        {q}
+                      </h3>
+                      <div className="flex items-center gap-2">
+                        {/* YES */}
+                        <div
+                          className={`flex-1 border p-2 ${
+                            isSelected && side === "yes"
+                              ? "border-green-400 bg-green-50"
+                              : "border-green-200 bg-green-50/50"
+                          }`}
+                        >
+                          <div className="flex items-center gap-1 mb-0.5">
+                            <svg
+                              width="10"
+                              height="10"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="#16a34a"
+                              strokeWidth="2.5"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
+                              <polyline points="22 7 13.5 15.5 8.5 10.5 2 17" />
+                              <polyline points="16 7 22 7 22 13" />
+                            </svg>
+                            <span className="text-[10px] font-bold text-green-700">
+                              YES
+                            </span>
+                          </div>
+                          <div className="text-[9px] text-gray-400">Bid / Ask</div>
+                          <div className="text-xs font-bold font-mono text-green-700">
+                            {cents(ba.yesBid)} / {cents(ba.yesAsk)}
+                          </div>
+                        </div>
+
+                        {/* NO */}
+                        <div
+                          className={`flex-1 border p-2 ${
+                            isSelected && side === "no"
+                              ? "border-red-400 bg-red-50"
+                              : "border-red-200 bg-red-50/50"
+                          }`}
+                        >
+                          <div className="flex items-center gap-1 mb-0.5">
+                            <svg
+                              width="10"
+                              height="10"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="#dc2626"
+                              strokeWidth="2.5"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
+                              <polyline points="22 17 13.5 8.5 8.5 13.5 2 7" />
+                              <polyline points="16 17 22 17 22 11" />
+                            </svg>
+                            <span className="text-[10px] font-bold text-red-700">
+                              NO
+                            </span>
+                          </div>
+                          <div className="text-[9px] text-gray-400">Bid / Ask</div>
+                          <div className="text-xs font-bold font-mono text-red-700">
+                            {cents(ba.noBid)} / {cents(ba.noAsk)}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+
+            {filtered.length === 0 && (
+              <div className="py-12 text-center text-gray-400 text-sm">
+                {search ? "No markets match your search." : "Loading markets..."}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

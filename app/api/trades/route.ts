@@ -22,7 +22,11 @@ export async function POST(request: NextRequest) {
     const marketId = body.market_id as string | undefined;
     const marketTitle = body.market_title as string | undefined;
     const side = body.side as string | undefined;
-    const confidence = typeof body.confidence === "number" ? body.confidence : undefined;
+
+    // Support both new (price in cents + qty) and legacy (confidence) formats
+    const rawPrice = typeof body.price === "number" ? body.price : undefined;
+    const rawQty = typeof body.qty === "number" ? body.qty : undefined;
+    const rawConfidence = typeof body.confidence === "number" ? body.confidence : undefined;
 
     if (!marketId || typeof marketId !== "string") {
       return apiError("market_id is required and must be a string", 400);
@@ -30,16 +34,35 @@ export async function POST(request: NextRequest) {
     if (!side || typeof side !== "string") {
       return apiError("side is required and must be a string", 400);
     }
-    if (confidence == null || typeof confidence !== "number" || isNaN(confidence)) {
-      return apiError("confidence is required and must be a number", 400);
-    }
 
     const sideLower = side.toLowerCase();
     if (sideLower !== "yes" && sideLower !== "no") {
       return apiError("side must be 'yes' or 'no'", 400);
     }
-    if (confidence < 0.01 || confidence > 1) {
-      return apiError("confidence must be between 0.01 and 1.0", 400);
+
+    // Derive confidence and qty from either format
+    let confidence: number;
+    let userQty: number;
+
+    if (rawPrice != null && rawQty != null) {
+      // New format: price in cents (1-99), qty as integer
+      if (rawPrice < 1 || rawPrice > 99) {
+        return apiError("price must be between 1 and 99 (cents)", 400);
+      }
+      if (rawQty < 1 || rawQty > 10000) {
+        return apiError("qty must be between 1 and 10000", 400);
+      }
+      confidence = rawPrice / 100;
+      userQty = Math.round(rawQty);
+    } else if (rawConfidence != null) {
+      // Legacy format: confidence 0.01 - 1.0
+      if (rawConfidence < 0.01 || rawConfidence > 1) {
+        return apiError("confidence must be between 0.01 and 1.0", 400);
+      }
+      confidence = rawConfidence;
+      userQty = Math.max(Math.round(rawConfidence * 100), 1);
+    } else {
+      return apiError("Either (price + qty) or confidence is required", 400);
     }
 
     const rateLimitKey = authAgent
@@ -51,7 +74,7 @@ export async function POST(request: NextRequest) {
     }
 
     const title = (typeof marketTitle === "string" ? marketTitle : marketId).slice(0, 500);
-    const qty = Math.max(Math.round(confidence * 100), 1);
+    const qty = userQty;
 
     let price_at_submit: number | null = null;
     try {
