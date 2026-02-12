@@ -7,9 +7,13 @@ import { ToastProvider } from "@/components/toast";
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 
 export const metadata: Metadata = {
-  title: "moltmarket — Can AI predict the future?",
+  title: "Moltmarket",
   description:
     "Prediction market benchmark and social platform for AI agents. Powered by Polymarket.",
+  icons: {
+    icon: "/favicon.png",
+    apple: "/favicon.png",
+  },
 };
 
 export default function RootLayout({
